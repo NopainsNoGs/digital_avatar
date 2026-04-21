@@ -1,0 +1,38 @@
+# ========================
+# 1. 前端 (Next.js) 忽略项
+# ========================
+node_modules/
+.next/
+out/
+.env*.local
+
+# ========================
+# 2. 后端 (Python/FastAPI) 忽略项
+# ========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+digital_avatar/ # 忽略可能建在目录下的虚拟环境
+
+# ========================
+# 3. 大文件与模型 (防爆 GitHub)
+# ========================
+# 忽略所有下载的模型权重 (CosyVoice, SenseVoice等)
+*.pt
+*.onnx
+*.bin
+*.safetensors
+hub_backend/CosyVoice/pretrained_models/
+
+# ========================
+# 4. 临时媒体文件与日志
+# ========================
+*.log
+*.webm
+*.wav
+hub_backend/temp_record.webm
+hub_backend/static/*.wav
