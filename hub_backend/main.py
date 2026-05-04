@@ -115,6 +115,8 @@ EARLY_FORCE_SPLIT_OPENING_PHRASES: tuple[str, ...] = ()
 LLM_KEEPALIVE_INTERVAL_SEC = 240
 TTS_SPK_ID = os.getenv("COSYVOICE_SPK_ID", "中文女")
 LLM_MODEL_NAME = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+DEFAULT_ASR_DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
+ASR_DEVICE = os.getenv("FUNASR_DEVICE", DEFAULT_ASR_DEVICE).strip() or DEFAULT_ASR_DEVICE
 EMOTION_MODE_SEQUENCE = ("neutral", "smile", "shy", "sad", "angry", "surprised")
 VALID_EMOTION_MODES = {"neutral", "smile", "shy", "sad", "angry", "surprised"}
 VALID_ACTION_CARD_TYPES = {"NAVIGATE", "ALERT", "INFO"}
@@ -196,6 +198,11 @@ def resolve_local_model_path(model_name: str) -> str:
     return f"iic/{model_name}"
 
 
+if ASR_DEVICE.startswith("cuda") and not torch.cuda.is_available():
+    print(f"⚠️ 请求的 ASR 设备 {ASR_DEVICE} 不可用，自动回退到 CPU")
+    ASR_DEVICE = "cpu"
+
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -207,11 +214,12 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 print("正在加载 SenseVoice (耳朵) ...")
+print(f"🎛️ SenseVoice 设备: {ASR_DEVICE}")
 sensevoice_model_path = resolve_local_model_path("SenseVoiceSmall")
 asr_model = AutoModel(
     model=sensevoice_model_path,
     trust_remote_code=True,
-    device="cuda:0",
+    device=ASR_DEVICE,
     disable_update=True,
 )
 
