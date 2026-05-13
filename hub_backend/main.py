@@ -666,6 +666,84 @@ def normalize_client_emotion_context(value: Any) -> dict[str, Any] | None:
     return context_payload
 
 
+def format_score_summary(scores: dict[str, float] | None, top_n: int = 3) -> str:
+    """
+    将情绪分数字典压缩成适合控制台展示的短文本。
+
+    参数:
+        scores: 归一化后的情绪分数字典。
+        top_n: 展示前几名情绪。
+    """
+    if not isinstance(scores, dict) or not scores:
+        return "n/a"
+
+    ranked_scores = sorted(
+        ((mode, max(0.0, float(score))) for mode, score in scores.items()),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    return " | ".join(f"{mode}:{score:.3f}" for mode, score in ranked_scores[:top_n])
+
+
+def format_modality_signal(signal: dict[str, Any] | None, include_metrics: bool = False) -> str:
+    """
+    将单个模态信号格式化成一行日志，便于演示多模态输入质量。
+
+    参数:
+        signal: facial/prosody/text 任一模态信号。
+        include_metrics: 是否额外输出 prosody metrics。
+    """
+    if signal is None:
+        return "missing"
+
+    emotion = normalize_emotion_mode(signal.get("emotion"))
+    confidence = clamp_unit(signal.get("confidence", 0.0))
+    sample_count = max(0, int(signal.get("sampleCount", 0)))
+    score_summary = format_score_summary(normalize_emotion_scores(signal.get("scores")))
+    parts = [
+        f"emotion={emotion}",
+        f"confidence={confidence:.4f}",
+        f"samples={sample_count}",
+        f"scores=[{score_summary}]",
+    ]
+
+    if include_metrics and isinstance(signal.get("metrics"), dict):
+        metrics = signal["metrics"]
+        parts.append(
+            "metrics="
+            f"(avgVol={float(metrics.get('averageVolume', 0.0)):.4f}, "
+            f"peakVol={float(metrics.get('peakVolume', 0.0)):.4f}, "
+            f"variation={float(metrics.get('variation', 0.0)):.4f}, "
+            f"speechRatio={float(metrics.get('speechRatio', 0.0)):.4f}, "
+            f"zcr={float(metrics.get('zeroCrossingRate', 0.0)):.4f})"
+        )
+
+    return ", ".join(parts)
+
+
+def log_client_emotion_context(context_payload: dict[str, Any] | None) -> None:
+    """
+    将前端采样得到的面部/韵律上下文打印到后端控制台。
+
+    参数:
+        context_payload: 规整后的 USER_EMOTION_CONTEXT。
+    """
+    print("🛰️ 前端多模态上下文:")
+    if not context_payload:
+        print("   - facial : missing")
+        print("   - prosody: missing")
+        print("   - captureDurationMs: n/a")
+        return
+
+    print(f"   - facial : {format_modality_signal(context_payload.get('facialEmotion'))}")
+    print(f"   - prosody: {format_modality_signal(context_payload.get('prosodyEmotion'), include_metrics=True)}")
+    capture_duration = context_payload.get("captureDurationMs")
+    if capture_duration:
+        print(f"   - captureDurationMs: {capture_duration}")
+    else:
+        print("   - captureDurationMs: n/a")
+
+
 def analyze_text_emotion(text: str) -> dict[str, Any]:
     """
     基于关键词和标点对用户文本做轻量情绪判断。
@@ -788,16 +866,41 @@ def fuse_user_emotion_analysis(transcript: str, client_context: dict[str, Any] |
     normalized_scores = normalize_emotion_scores(fused_scores)
     final_emotion, confidence = infer_dominant_emotion(normalized_scores)
 
-    return {
+    result = {
         "transcript": transcript,
         "finalEmotion": final_emotion,
         "confidence": confidence,
         "weights": normalized_weights,
         "scores": normalized_scores,
+        "rawWeights": {key: round(value, 4) for key, value in raw_weights.items()},
         "facialEmotion": facial_emotion,
         "prosodyEmotion": prosody_emotion,
         "textEmotion": text_emotion,
     }
+
+    available_modalities = sum(1 for signal in modality_map.values() if signal is not None)
+    print("🧩 多模态情绪融合结果:")
+    print(f"   - transcript: {transcript or '<empty>'}")
+    print(f"   - modalityCoverage: {available_modalities}/3")
+    print(f"   - facial : {format_modality_signal(facial_emotion)}")
+    print(f"   - prosody: {format_modality_signal(prosody_emotion, include_metrics=True)}")
+    print(f"   - text   : {format_modality_signal(text_emotion)}")
+    print(
+        "   - rawWeights: "
+        f"facial={raw_weights.get('facial', 0.0):.4f}, "
+        f"prosody={raw_weights.get('prosody', 0.0):.4f}, "
+        f"text={raw_weights.get('text', 0.0):.4f}"
+    )
+    print(
+        "   - normalizedWeights: "
+        f"facial={normalized_weights.get('facial', 0.0):.4f}, "
+        f"prosody={normalized_weights.get('prosody', 0.0):.4f}, "
+        f"text={normalized_weights.get('text', 0.0):.4f}"
+    )
+    print(f"   - fusedScores: {format_score_summary(normalized_scores, top_n=len(EMOTION_MODE_SEQUENCE))}")
+    print(f"   => finalEmotion={final_emotion}, confidence={confidence:.4f}")
+
+    return result
 
 
 def build_user_emotion_guidance(user_emotion_analysis: dict[str, Any] | None) -> str:
@@ -1259,12 +1362,17 @@ async def receive_user_turn(websocket: WebSocket) -> dict[str, Any]:
         if message_type == "USER_EMOTION_CONTEXT":
             # 情绪上下文可能先于音频包到达，暂存后绑定到下一轮用户输入。
             pending_emotion_context = normalize_client_emotion_context(payload.get("payload"))
+            log_client_emotion_context(pending_emotion_context)
             continue
 
         if message_type == "TEXT_INPUT":
+            inline_context = normalize_client_emotion_context(payload.get("emotionContext")) or pending_emotion_context
+            if inline_context is not None:
+                print("🧪 文本调试入口附带情绪上下文")
+                log_client_emotion_context(inline_context)
             return {
                 "text": str(payload.get("text", "")).strip(),
-                "emotionContext": normalize_client_emotion_context(payload.get("emotionContext")) or pending_emotion_context,
+                "emotionContext": inline_context,
             }
 
         return {"text": "", "emotionContext": pending_emotion_context}
