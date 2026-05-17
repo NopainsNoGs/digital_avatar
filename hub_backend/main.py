@@ -9,7 +9,6 @@ import threading
 import time
 import uuid
 from typing import Any
-import scipy.io.wavfile as wavfile
 import httpx
 import numpy as np
 import torch
@@ -19,11 +18,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from funasr import AutoModel
 from openai import AsyncOpenAI
-
-try:
-    from .video_pipeline import auto_generate_video, shutdown_talker_service, warm_up_talker_service
-except ImportError:
-    from video_pipeline import auto_generate_video, shutdown_talker_service, warm_up_talker_service
 
 
 VISEME_FPS = 60
@@ -276,7 +270,6 @@ llm_client = AsyncOpenAI(
     http_client=custom_http_client,
 )
 llm_keepalive_task: asyncio.Task | None = None
-talker_warmup_task: asyncio.Task | None = None
 
 
 async def warm_up_llm_model(reason: str) -> None:
@@ -333,21 +326,6 @@ async def maintain_llm_keepalive() -> None:
         await warm_up_llm_model("keepalive")
 
 
-async def warm_up_talker_service_background() -> None:
-    """
-    后台启动并预热 Linly-Talker API，避免第一轮视频生成时才加载 Wav2Lip。
-
-    参数:
-        无传入参数，直接复用 video_pipeline 中的固定 Linly-Talker 配置。
-    """
-    print("♨️ 正在后台预热 Linly-Talker Wav2Lip ...")
-    try:
-        await asyncio.to_thread(warm_up_talker_service)
-        print("♨️ Linly-Talker Wav2Lip 预热完成")
-    except Exception as exc:
-        print(f"⚠️ Linly-Talker Wav2Lip 预热失败，视频生成时将使用兜底路径: {exc}")
-
-
 @app.on_event("startup")
 async def startup_event() -> None:
     """
@@ -357,10 +335,7 @@ async def startup_event() -> None:
         无传入参数，由 FastAPI 生命周期自动调用。
     """
     global llm_keepalive_task
-    global talker_warmup_task
 
-    # Linly-Talker 预热是独立进程，先后台启动以覆盖 LLM/TTS 预热期间的等待时间。
-    talker_warmup_task = asyncio.create_task(warm_up_talker_service_background())
     # LLM 是异步请求，TTS 是同步推理；TTS 放到线程里避免阻塞事件循环。
     await warm_up_llm_model("startup")
     await asyncio.to_thread(warm_up_tts_model)
@@ -376,7 +351,6 @@ async def shutdown_event() -> None:
         无传入参数，由 FastAPI 生命周期自动调用。
     """
     global llm_keepalive_task
-    global talker_warmup_task
 
     if llm_keepalive_task is not None:
         # 先 cancel 再等待任务退出，避免关闭时留下悬挂协程。
@@ -385,14 +359,6 @@ async def shutdown_event() -> None:
             await llm_keepalive_task
         llm_keepalive_task = None
 
-    if talker_warmup_task is not None:
-        if not talker_warmup_task.done():
-            talker_warmup_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await talker_warmup_task
-        talker_warmup_task = None
-
-    await asyncio.to_thread(shutdown_talker_service)
     await custom_http_client.aclose()
 
 
@@ -1898,7 +1864,7 @@ async def stream_tts_pipeline(
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    print("终端大屏已连接至中枢大脑 (切换为 2D 视频渲染模式)")
+    print("终端大屏已连接至中枢大脑 (切换为 Live2D 音频驱动模式)")
     send_lock = asyncio.Lock()
 
     try:
@@ -1918,8 +1884,8 @@ async def websocket_endpoint(websocket: WebSocket):
             await safe_send_json(websocket, send_lock, {"type": "USER_EMOTION_ANALYSIS", "payload": user_emotion_analysis})
 
             sentence_queue: asyncio.Queue[str | None] = asyncio.Queue()
-            
-            # 1. 依然让 LLM 去思考并推文本流（保持前端字幕实时性）
+
+            # 1. LLM 流式产出文本并持续切句
             llm_task = asyncio.create_task(
                 stream_llm_reply(
                     clean_text=clean_text,
@@ -1929,65 +1895,47 @@ async def websocket_endpoint(websocket: WebSocket):
                     user_emotion_analysis=user_emotion_analysis,
                 )
             )
-            
-            # 等待 LLM 完全说完
-            llm_payload = await llm_task 
+
+            # 2. TTS 立即消费切好的句段，持续推音频和 viseme。
+            tts_task = asyncio.create_task(
+                stream_tts_pipeline(
+                    websocket=websocket,
+                    send_lock=send_lock,
+                    sentence_queue=sentence_queue,
+                    turn_started_at=turn_started_at,
+                )
+            )
+
+            llm_payload = await llm_task
+            tts_payload = await tts_task
             full_reply_text = llm_payload["replyText"]
-            print(f"🧠 LLM 思考完毕，准备生成声音: {full_reply_text}")
-            
-            if full_reply_text and full_reply_text != "系统处理异常，请稍后再试。":
-                await safe_send_json(websocket, send_lock, {"type": "STATUS_UPDATE", "status": "SPEAKING"})
-                
-                # 2. 生成全句的音频（阻塞式）
-                audio_filename = f"reply_{uuid.uuid4().hex}.wav"
-                video_filename = f"reply_{uuid.uuid4().hex}.mp4"
-                audio_path = os.path.join(static_dir, audio_filename)
-                video_path = os.path.join(static_dir, video_filename)
-                
-                print(f"🎙️ 正在生成语音文件...")
-                audio_tensors = []
-                # 注意这里 stream=False，直接拿完整音频
-                for output in tts_model.inference_sft(full_reply_text, TTS_SPK_ID, stream=False):
-                    audio_tensors.append(output["tts_speech"])
-                
-                if audio_tensors:
-                    final_tensor = torch.cat(audio_tensors, dim=-1)
-                    sample_rate = getattr(tts_model, "sample_rate", 22050)
-                    pcm_int16 = (torch.clamp(final_tensor.squeeze(), -1.0, 1.0).numpy() * 32767.0).astype(np.int16)
-                    # 将音频保存到硬盘，供给 Linly-Talker 读取
-                    wavfile.write(audio_path, sample_rate, pcm_int16)
-                    
-                    # 3. 召唤 Linly-Talker 进行换脸渲染！
-                    print(f"🎬 开始渲染 2D 视频 (优先复用 Linly-Talker API，失败后 subprocess 兜底)...")
-                    try:
-                        # 调用 Codex 帮你写好的流水线工具
-                        final_video = await asyncio.to_thread(auto_generate_video, audio_path, video_path)
-                        video_url = f"/static/{os.path.basename(final_video)}"
-                        print(f"✅ 视频渲染完毕！分发地址: {video_url}")
-                        
-                        # 4. 把最终的视频地址发送给前端播放
-                        await safe_send_json(
-                            websocket,
-                            send_lock,
-                            {
-                                "type": "AGENT_REPLY",
-                                "status": "SPEAKING",
-                                "payload": {
-                                    "transcript": clean_text,
-                                    "replyText": full_reply_text,
-                                    "emotionMode": llm_payload["emotionMode"],
-                                    "actionCard": llm_payload["actionCard"],
-                                    "videoUrl": video_url, # 前端就靠这个字段放视频了！
-                                    "userEmotionAnalysis": user_emotion_analysis,
-                                },
-                            },
-                        )
-                    except Exception as e:
-                        print(f"❌ 视频生成失败: {e}")
-                        await safe_send_json(websocket, send_lock, {"type": "STATUS_UPDATE", "status": "IDLE"})
-            
-            # 本回合彻底结束，回到待机
-            await safe_send_json(websocket, send_lock, {"type": "STATUS_UPDATE", "status": "IDLE"})
+
+            print(f"🧠 LLM 最终回复: {full_reply_text}")
+            if tts_payload["started"]:
+                print(
+                    "🎧 Live2D 播报链路完成: "
+                    f"streamId={tts_payload['streamId']}, "
+                    f"audioDuration={tts_payload['audioDuration']:.3f}s"
+                )
+            else:
+                print("⚠️ 本轮未产出可播放音频流")
+
+            await safe_send_json(
+                websocket,
+                send_lock,
+                {
+                    "type": "AGENT_REPLY",
+                    "status": "SPEAKING" if tts_payload["started"] else "IDLE",
+                    "payload": {
+                        "transcript": clean_text,
+                        "replyText": full_reply_text,
+                        "emotionMode": llm_payload["emotionMode"],
+                        "actionCard": llm_payload["actionCard"],
+                        "audioDuration": tts_payload["audioDuration"],
+                        "userEmotionAnalysis": user_emotion_analysis,
+                    },
+                },
+            )
 
     except WebSocketDisconnect:
         print("终端大屏已断开连接")
