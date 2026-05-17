@@ -1,0 +1,86 @@
+/* 1. v4 版本必须且只能用这一句引入核心库 */
+@import "tailwindcss";
+
+/* 2. v4 版本的全新主题变量定义方式 */
+@theme {
+  --color-hub-dark: #000b18;
+  --color-hub-cyan: #00e5ff;
+  --color-hub-blue: #0066ff;
+  --color-hub-accent: #bef264;
+}
+
+html {
+  height: 100%;
+}
+
+/* 3. 全局基础样式 */
+body {
+  position: relative;
+  min-height: 100%;
+  background-color: var(--color-hub-dark);
+  color: white;
+  overflow: hidden;
+  font-family: "SF Pro Display", "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+}
+
+/* 4. v4 版本的全新自定义工具类写法 (@utility 代替原来的 @layer utilities) */
+@utility glass-card {
+  @apply bg-white/5 backdrop-blur-2xl border border-white/10 shadow-[0_8px_32px_0_rgba(0,0,0,0.8)];
+}
+
+@utility neon-glow-cyan {
+  @apply shadow-[0_0_20px_rgba(0,229,255,0.3)];
+}
+
+.camera-grid::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(125, 211, 252, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(125, 211, 252, 0.08) 1px, transparent 1px);
+  background-size: 28px 28px;
+  opacity: 0.85;
+}
+
+.camera-grid::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 0%, rgba(14, 165, 233, 0.07) 48%, transparent 100%);
+  mix-blend-mode: screen;
+}
+
+.camera-scan {
+  animation: camera-scan-sweep 3.2s ease-in-out infinite;
+}
+
+.avatar-video::-webkit-media-controls,
+.avatar-video::-webkit-media-controls-enclosure,
+.avatar-video::-webkit-media-controls-panel,
+.avatar-video::-webkit-media-controls-play-button,
+.avatar-video::-webkit-media-controls-timeline,
+.avatar-video::-webkit-media-controls-current-time-display,
+.avatar-video::-webkit-media-controls-time-remaining-display,
+.avatar-video::-webkit-media-controls-mute-button,
+.avatar-video::-webkit-media-controls-volume-slider,
+.avatar-video::-webkit-media-controls-fullscreen-button {
+  display: none !important;
+}
+
+.avatar-video {
+  pointer-events: none;
+}
+
+@keyframes camera-scan-sweep {
+  0%,
+  100% {
+    transform: translateY(-140px);
+    opacity: 0.2;
+  }
+
+  50% {
+    transform: translateY(140px);
+    opacity: 1;
+  }
+}

@@ -1,0 +1,30 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "avatar.moc3",
+		"Textures": [
+			"avatar.4096/texture_00.png",
+			"avatar.4096/texture_01.png"
+		],
+		"Physics": "avatar.physics3.json",
+		"DisplayInfo": "avatar.cdi3.json",
+		"Expressions": [
+			{
+				"Name": "hide_watermark",
+				"File": "hide_watermark.exp3.json"
+			}
+		]
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": []
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		}
+	]
+}
