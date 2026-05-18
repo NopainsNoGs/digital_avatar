@@ -1,7 +1,9 @@
 'use client';
 
 import { AnimatePresence, motion } from 'framer-motion';
+import { useState } from 'react';
 import Live2DAvatar from '@/components/Live2DAvatar';
+import type { AvatarViewMode } from '@/components/Live2DAvatar';
 import { useTerminalSocket } from '@/hooks/useTerminalSocket';
 
 const EMOTION_LABELS: Record<string, string> = {
@@ -61,6 +63,7 @@ function SignalTile({
 
 export default function TerminalPage() {
   const socketUrl = resolveSocketUrl();
+  const [avatarViewMode, setAvatarViewMode] = useState<AvatarViewMode>('half');
   const {
     status,
     currentResponse,
@@ -133,6 +136,13 @@ export default function TerminalPage() {
                     <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-[11px] tracking-[0.2em] text-white/60">
                       口播风格 {EMOTION_LABELS[avatarEmotion] || avatarEmotion}
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => setAvatarViewMode((mode) => (mode === 'half' ? 'full' : 'half'))}
+                      className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1 text-[11px] tracking-[0.18em] text-cyan-100 transition hover:bg-cyan-300/18"
+                    >
+                      {avatarViewMode === 'half' ? '切换全身' : '切换半身'}
+                    </button>
                   </div>
 
                   <div className="absolute right-5 top-5 z-20 hidden gap-2 md:flex">
@@ -146,6 +156,7 @@ export default function TerminalPage() {
                       <Live2DAvatar
                         status={status}
                         emotion={avatarEmotion}
+                        viewMode={avatarViewMode}
                         mouthOpenRef={mouthOpenRef}
                         visemeTrackRef={avatarVisemeTrackRef}
                         speechTimeRef={avatarSpeechTimeRef}

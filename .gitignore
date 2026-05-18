@@ -34,5 +34,6 @@ hub_backend/CosyVoice/pretrained_models/
 *.log
 *.webm
 *.wav
+*.mp4
 hub_backend/temp_record.webm
 hub_backend/static/*.wav

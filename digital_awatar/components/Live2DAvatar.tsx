@@ -7,11 +7,14 @@ import type { VisemeFrame } from '@/types/terminal';
 type Live2DAvatarProps = {
   status: string;
   emotion?: string;
+  viewMode?: AvatarViewMode;
   visemeTrackRef?: MutableRefObject<VisemeFrame[]>;
   speechTimeRef?: MutableRefObject<number>;
   speakingRef?: MutableRefObject<boolean>;
   mouthOpenRef?: MutableRefObject<number>;
 };
+
+export type AvatarViewMode = 'full' | 'half';
 
 type RuntimeWindow = Window & typeof globalThis & {
   PIXI?: unknown;
@@ -134,6 +137,7 @@ function resolveBlink(nowSeconds: number) {
 export default function Live2DAvatar({
   status,
   emotion = 'neutral',
+  viewMode = 'half',
   visemeTrackRef,
   speechTimeRef,
   speakingRef,
@@ -144,6 +148,8 @@ export default function Live2DAvatar({
   const lastSpeechTimeRef = useRef(0);
   const emotionRef = useRef(emotion);
   const statusRef = useRef(status);
+  const viewModeRef = useRef<AvatarViewMode>(viewMode);
+  const resizeModelRef = useRef<(() => void) | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
 
@@ -154,6 +160,11 @@ export default function Live2DAvatar({
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
+
+  useEffect(() => {
+    viewModeRef.current = viewMode;
+    resizeModelRef.current?.();
+  }, [viewMode]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -234,12 +245,16 @@ export default function Live2DAvatar({
 
           const internalWidth = model.internalModel?.width ?? 1;
           const internalHeight = model.internalModel?.height ?? 1;
-          const scale = Math.min((width * 0.78) / internalWidth, (height * 0.94) / internalHeight);
+          const fullScale = Math.min((width * 0.78) / internalWidth, (height * 0.94) / internalHeight);
+          const isHalfBody = viewModeRef.current === 'half';
+          const scale = isHalfBody ? fullScale * 2 : fullScale;
+          const positionY = isHalfBody ? height * 2 : height * 0.96;
 
           model.scale?.set(scale);
-          model.position?.set(width * 0.52, height * 0.96);
+          model.position?.set(width * 0.52, positionY);
         };
 
+        resizeModelRef.current = resize;
         resize();
         resizeObserver = new ResizeObserver(resize);
         resizeObserver.observe(host);
@@ -322,6 +337,7 @@ export default function Live2DAvatar({
       cancelled = true;
       resizeObserver?.disconnect();
       resizeObserver = null;
+      resizeModelRef.current = null;
       cleanupTicker?.();
 
       if (model && app) {
