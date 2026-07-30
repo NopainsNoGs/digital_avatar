@@ -1,0 +1,10 @@
+{
+  "name": "chinavr-awatar-demo-build",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "docx": "^9.5.1",
+    "pptxgenjs": "^4.0.1"
+  }
+}
