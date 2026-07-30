@@ -28,7 +28,7 @@
 
 **Interfaces:**
 - Consumes: a LaTeX source path and its compiled final PDF at fixed repository locations.
-- Produces: process exit 0 only when Figures 2 and 3 are separate floats, the PDF has 14 pages, page 8 contains Section 3.4 content, and figure references are present.
+- Produces: process exit 0 only when Figures 2 and 3 are separate floats, the PDF has 14 pages, page 8 contains Section 3.4 body content or Table 3, and figure references are present.
 
 - [ ] **Step 1: Write the failing verifier**
 
@@ -44,8 +44,10 @@ assert r"\begin{figure}" in between
 ```
 
 It must also run `pdfinfo` and `pdftotext -f 8 -l 8 -layout`, assert a
-14-page PDF, require `3.4` and `多模态融合消融实验` in page-8 text, and reject
-`??` cross-reference markers in the full extracted text.
+14-page PDF, require Table 3 and `多模态情感识别消融结果` in page-8 text, and
+reject `??` cross-reference markers in the full extracted text. The Section
+3.4 heading itself may remain on page 7 as long as its body continues on
+page 8.
 
 - [ ] **Step 2: Run the verifier to confirm RED**
 
@@ -191,4 +193,3 @@ sha256sum paper/ChinaVR_Awatar_Final_20260730.pdf
 
 Leave `v2-new-version` and the current working tree in place. Do not stage
 or commit the untracked `paper/` tree, and do not push or create a PR.
-
