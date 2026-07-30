@@ -51,6 +51,7 @@ def encode_segment(
         "format=yuv420p"
     )
     audio_filter = (
+        "loudnorm=I=-20:TP=-1.5:LRA=7,"
         "adelay=250:all=1,"
         "aformat=sample_rates=48000:channel_layouts=stereo,"
         "apad=pad_dur=0.35"
