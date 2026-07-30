@@ -32,5 +32,14 @@ assert.match(SLIDES[5].narration, /跨说话人/);
 assert.match(SLIDES[5].narration, /多噪声/);
 assert.match(SLIDES[5].narration, /自然交互/);
 assert.match(SLIDES[5].narration, /感谢观看。$/);
+const narrationCharacters = SLIDES.reduce(
+  (sum, slide) =>
+    sum + slide.narration.replace(/[，。；：、,.!?！？\s]/g, "").length,
+  0,
+);
+assert.ok(
+  narrationCharacters <= 490,
+  `narration is too dense for the time budget: ${narrationCharacters}`,
+);
 
 console.log("content contract: PASS");

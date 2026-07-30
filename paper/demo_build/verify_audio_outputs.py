@@ -6,6 +6,12 @@ from pathlib import Path
 BUILD_DIR = Path(__file__).resolve().parent
 AUDIO_DIR = BUILD_DIR / "audio"
 EXPECTED = [AUDIO_DIR / f"slide_{index}.mp3" for index in range(1, 7)]
+SETTINGS_FILE = AUDIO_DIR / "synthesis_settings.json"
+EXPECTED_SETTINGS = {
+    "voice": "zh-CN-YunyangNeural",
+    "rate": "+8%",
+    "pitch": "-6Hz",
+}
 
 
 def duration_seconds(path: Path) -> float:
@@ -28,6 +34,11 @@ def duration_seconds(path: Path) -> float:
 
 
 durations = []
+assert SETTINGS_FILE.is_file(), "synthesis_settings.json missing"
+settings = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+assert settings == EXPECTED_SETTINGS, (
+    f"unexpected synthesis settings: {settings!r}"
+)
 for audio_file in EXPECTED:
     assert audio_file.is_file(), f"{audio_file.name} missing"
     assert audio_file.stat().st_size > 10_000, f"{audio_file.name} too small"
@@ -36,13 +47,11 @@ for audio_file in EXPECTED:
     durations.append(clip_duration)
 
 padded_total = sum(durations) + 0.6 * len(durations)
-assert padded_total < 114.0, f"padded narration too long: {padded_total:.3f}s"
-assert padded_total > 70.0, f"padded narration unexpectedly short: {padded_total:.3f}s"
+assert padded_total <= 110.0, f"padded narration too long: {padded_total:.3f}s"
+assert padded_total >= 100.0, f"padded narration too short: {padded_total:.3f}s"
 
 manifest = {
-    "voice": "zh-CN-YunyangNeural",
-    "rate": "-3%",
-    "pitch": "-6Hz",
+    **settings,
     "clips": [
         {"slide": index, "seconds": round(seconds, 3)}
         for index, seconds in enumerate(durations, start=1)
