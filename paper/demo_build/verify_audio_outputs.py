@@ -58,9 +58,12 @@ manifest = {
     ],
     "padded_total_seconds": round(padded_total, 3),
 }
-(AUDIO_DIR / "durations.json").write_text(
-    json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-    encoding="utf-8",
-)
+manifest_path = AUDIO_DIR / "durations.json"
+manifest_text = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+if (
+    not manifest_path.is_file()
+    or manifest_path.read_text(encoding="utf-8") != manifest_text
+):
+    manifest_path.write_text(manifest_text, encoding="utf-8")
 print(json.dumps(manifest, ensure_ascii=False, indent=2))
 print("audio output contract: PASS")

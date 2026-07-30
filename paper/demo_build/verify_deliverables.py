@@ -148,8 +148,18 @@ def main() -> None:
         stream for stream in metadata["streams"] if stream["codec_type"] == "audio"
     )
     duration = float(metadata["format"]["duration"])
-    assert duration < 115.0, f"video exceeds safe duration: {duration:.3f}s"
+    assert duration >= 100.0, f"video is unexpectedly short: {duration:.3f}s"
+    assert duration <= 110.0, f"video exceeds target duration: {duration:.3f}s"
     assert duration < 120.0, f"video exceeds absolute duration: {duration:.3f}s"
+    narration_manifest = (
+        ROOT_DIR / "paper" / "demo_build" / "audio" / "durations.json"
+    )
+    assert video_path.stat().st_mtime > pptx_path.stat().st_mtime, (
+        "video is older than PPTX"
+    )
+    assert video_path.stat().st_mtime > narration_manifest.stat().st_mtime, (
+        "video is older than narration manifest"
+    )
     assert video_stream["codec_name"] == "h264"
     assert video_stream["width"] == 1920
     assert video_stream["height"] == 1080
