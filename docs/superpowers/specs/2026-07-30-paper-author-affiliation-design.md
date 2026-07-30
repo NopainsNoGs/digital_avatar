@@ -15,7 +15,6 @@ Keep the following author order in both languages:
 3. 代菊 — 鹏城实验室
 4. 李瑾 — 北方工业大学
 5. 解超 — 中交信有限责任公司
-6. 徐浩延 — 北方工业大学
 
 Use affiliation superscripts because the paper contains authors from
 three institutions:
@@ -29,7 +28,7 @@ three institutions:
 Set the existing fields to:
 
 ```tex
-\cnauthors{陈卓岗\textsuperscript{1}，周锋\textsuperscript{1}，代菊\textsuperscript{2}，李瑾\textsuperscript{1}，解超\textsuperscript{3}，徐浩延\textsuperscript{1}}
+\cnauthors{陈卓岗\textsuperscript{1}，周锋\textsuperscript{1}，代菊\textsuperscript{2}，李瑾\textsuperscript{1}，解超\textsuperscript{3}}
 
 \cnaffil{%
     1. 北方工业大学；
@@ -44,7 +43,7 @@ Follow the official template's surname-first ordering. Use the approved
 spellings:
 
 ```tex
-\enauthors{Chen Zhuogang\textsuperscript{1}, Zhou Feng\textsuperscript{1}, Dai Ju\textsuperscript{2}, Li Jin\textsuperscript{1}, Xie Chao\textsuperscript{3}, Xu Haoyan\textsuperscript{1}}
+\enauthors{Chen Zhuogang\textsuperscript{1}, Zhou Feng\textsuperscript{1}, Dai Ju\textsuperscript{2}, Li Jin\textsuperscript{1}, Xie Chao\textsuperscript{3}}
 
 \enaffil{%
     1. North China University of Technology;
@@ -74,8 +73,9 @@ Do not add or change:
 
 Compile twice with Tectonic and inspect the first page. Confirm:
 
-- all six Chinese names appear once and in the approved order;
-- all six English names appear once and in the approved order;
+- all five Chinese names appear once and in the approved order;
+- all five English names appear once and in the approved order;
+- 徐浩延 and `Xu Haoyan` do not appear in the author metadata;
 - superscripts map each author to the correct numbered institution;
 - all three affiliations appear in both languages;
 - the title and abstract remain unchanged;
@@ -83,4 +83,3 @@ Compile twice with Tectonic and inspect the first page. Confirm:
 - all references remain resolved and there are no fatal compilation errors;
 - the paper remains 14 pages if the added front matter fits without changing
   the template's typography.
-
