@@ -45,7 +45,7 @@
 
 ---
 
-### Task 1: Add failing visual and bibliography regression tests
+### Task 1: Add failing visual regression tests
 
 **Files:**
 - Create: `paper/experiments/tests/test_visual_revision.py`
@@ -77,7 +77,6 @@ from PIL import Image
 
 
 ROOT = Path(__file__).resolve().parents[3]
-PAPER_MAIN = ROOT / "paper" / "ChinaVR_Awatar_Overleaf_FINAL_20260730" / "main.tex"
 
 
 def load_module(name: str, path: Path):
@@ -235,48 +234,7 @@ def test_eight_pixel_mosaic_is_lighter_and_preserves_outside_region():
     assert np.array_equal(np.asarray(light)[:20, :20], np.asarray(source)[:20, :20])
 ```
 
-- [ ] **Step 5: Add bibliography-state tests**
-
-Parse each `\bibitem` block and verify the five formalized references, ten retained preprints, and five new keys:
-
-```python
-def bibitem_block(text: str, key: str) -> str:
-    marker = rf"\bibitem{{{key}}}"
-    start = text.index(marker)
-    next_item = text.find(r"\bibitem{", start + len(marker))
-    return text[start:] if next_item == -1 else text[start:next_item]
-
-
-def test_arxiv_audit_and_2026_references_are_reflected_in_tex():
-    text = PAPER_MAIN.read_text(encoding="utf-8")
-    formalized = {
-        "kartynnik2019facial", "fang2025llamaomni", "fu2025vita15",
-        "xu2024vasa1", "cui2024hallo2",
-    }
-    retained_preprints = {
-        "lugaresi2019mediapipe", "an2024sensevoice", "du2024cosyvoice",
-        "yang2024qwen25", "xu2025qwen25omni", "huang2025stepaudio",
-        "kimiteam2025kimiaudio", "yang2025qwen3",
-        "guo2024liveportrait", "li2024latentsync",
-    }
-    new_2026 = {
-        "seong2026emart", "girish2026prosody", "ray2026tauvoice",
-        "wu2026ipadapter", "yee2026synchrorama",
-    }
-
-    for key in formalized:
-        assert "arXiv:" not in bibitem_block(text, key)
-    for key in retained_preprints:
-        assert "arXiv:" in bibitem_block(text, key)
-    for key in new_2026:
-        block = bibitem_block(text, key)
-        assert "2026" in block
-        assert "arXiv:" not in block
-        assert text.count(rf"\bibitem{{{key}}}") == 1
-        assert rf"\cite{{{key}}}" in text
-```
-
-- [ ] **Step 6: Run the tests and verify they fail for the intended reasons**
+- [ ] **Step 5: Run the tests and verify they fail for the intended reasons**
 
 Run:
 
@@ -285,9 +243,9 @@ Run:
   paper/experiments/tests/test_visual_revision.py -q
 ```
 
-Expected: failures show existing bar `Rectangle` patches, visible grid lines, the 16-pixel default mosaic, missing new bibliography keys, and redundant arXiv markers in formal conference entries.
+Expected: failures show existing bar `Rectangle` patches, visible grid lines, and the 16-pixel default mosaic.
 
-- [ ] **Step 7: Record a review checkpoint without staging user-owned paper files**
+- [ ] **Step 6: Record a review checkpoint without staging user-owned paper files**
 
 Run `git status --short` and confirm the only new task artifact is the test file under the already-untracked `paper/experiments/` tree. Do not run `git add paper/...`.
 
@@ -298,7 +256,6 @@ Run `git status --short` and confirm the only new task artifact is the test file
 **Files:**
 - Modify: `paper/experiments/run_paper_experiments.py:510-552`
 - Modify: `paper/experiments/run_paper_experiments.py:1210-1334`
-- Test: `paper/experiments/tests/test_visual_revision.py`
 
 **Interfaces:**
 - Consumes: the existing result dictionaries and existing output stems.
@@ -669,18 +626,7 @@ Insert them near the related topical groups:
 		Yee P T, Kollias D, Mishra S, Dhall A. SynchroRaMa: Lip-synchronized and emotion-aware talking face generation via multi-modal emotion embedding[C]//Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision. 2026: 4546-4555.
 ```
 
-- [ ] **Step 6: Run the bibliography-state test**
-
-Run:
-
-```bash
-/home/czg/anaconda3/envs/digital_avatar/bin/python -m pytest \
-  paper/experiments/tests/test_visual_revision.py::test_arxiv_audit_and_2026_references_are_reflected_in_tex -q
-```
-
-Expected: PASS.
-
-- [ ] **Step 7: Perform exact-count and duplicate checks**
+- [ ] **Step 6: Perform the structured bibliography audit**
 
 Run:
 
@@ -697,7 +643,7 @@ Expected:
 - arXiv appears only in the ten retained preprint blocks;
 - each new key appears once as a `\bibitem` and at least once in a citation.
 
-- [ ] **Step 8: Record a review checkpoint without staging**
+- [ ] **Step 7: Record a review checkpoint without staging**
 
 Run `git diff --check` when available, otherwise inspect the edited TeX ranges with `sed`. Do not stage the user-owned final paper tree.
 
