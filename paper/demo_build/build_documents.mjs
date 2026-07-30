@@ -249,13 +249,13 @@ function addScoreBars(slide, x, y, values, colors) {
 function buildSlide1(slideSpec) {
   const slide = pptx.addSlide("DARK_MASTER");
   slide.background = { color: C.bg };
-  addBackgroundGlow(slide, -1.3, -1.2, 7.2, 5.3, C.cyan2, 91);
-  addBackgroundGlow(slide, 8.3, 3.8, 6.3, 4.6, C.blue, 93);
+  addBackgroundGlow(slide, -2.2, -2.1, 7.8, 6.2, C.cyan2, 94);
+  addBackgroundGlow(slide, 9.4, 3.7, 5.8, 4.7, C.blue, 95);
 
-  slide.addText("CHINAVR 2026 · PAPER DEMO", {
+  slide.addText("CHINAVR 2026 · ANONYMOUS PAPER DEMO", {
     x: 0.68,
-    y: 0.52,
-    w: 4.2,
+    y: 0.5,
+    w: 5.1,
     h: 0.26,
     fontFace: FONT,
     fontSize: 9,
@@ -264,119 +264,185 @@ function buildSlide1(slideSpec) {
     charSpacing: 1.7,
     margin: 0,
   });
-  slide.addText("面向交通枢纽服务的", {
-    x: 0.66,
-    y: 1.02,
-    w: 5.85,
-    h: 0.54,
+  slide.addShape(pptx.ShapeType.line, {
+    x: 0.69,
+    y: 1.18,
+    w: 0,
+    h: 1.57,
+    line: { color: C.cyan, width: 3.2 },
+  });
+  slide.addText("面向交通枢纽的\n情感感知流式数字人", {
+    x: 0.91,
+    y: 1.12,
+    w: 5.95,
+    h: 1.58,
     fontFace: FONT,
-    fontSize: 28,
+    fontSize: 32,
     bold: true,
     color: C.white,
     margin: 0,
+    fit: "shrink",
   });
-  slide.addText("多模态情感感知与\n流式驱动数字人交互方法", {
-    x: 0.64,
-    y: 1.56,
-    w: 6.2,
-    h: 1.48,
+  slide.addText("多模态情感感知与流式驱动数字人交互方法", {
+    x: 0.92,
+    y: 2.94,
+    w: 5.8,
+    h: 0.38,
     fontFace: FONT,
-    fontSize: 31,
+    fontSize: 14,
     bold: true,
-    color: C.white,
-    breakLine: false,
+    color: C.cyan,
     margin: 0,
     fit: "shrink",
   });
-  slide.addText("不只回答正确，更要理解旅客状态，并尽早给出一致的语音与动作反馈。", {
-    x: 0.7,
-    y: 3.35,
-    w: 5.7,
-    h: 0.75,
+  slide.addText(
+    "融合面部、语音与文本状态，\n让数字人更懂旅客，并更早给出一致反馈。",
+    {
+      x: 0.93,
+      y: 3.62,
+      w: 5.65,
+      h: 0.86,
+      fontFace: FONT,
+      fontSize: 17,
+      color: "CBD5E1",
+      breakLine: false,
+      margin: 0,
+      fit: "shrink",
+    },
+  );
+  addPill(slide, "多模态感知", 0.92, 4.83, 1.6, C.cyan);
+  addPill(slide, "首响优先", 2.73, 4.83, 1.5, C.amber);
+  addPill(slide, "音画同步", 4.44, 4.83, 1.5, C.green);
+  slide.addText("研究问题  →  方法设计  →  实验结果", {
+    x: 0.94,
+    y: 5.72,
+    w: 4.7,
+    h: 0.28,
     fontFace: FONT,
-    fontSize: 16,
-    color: "CBD5E1",
-    breakLine: false,
+    fontSize: 10,
+    bold: true,
+    color: C.muted,
+    charSpacing: 0.6,
     margin: 0,
-    fit: "shrink",
   });
-  addPill(slide, "感知情绪", 0.7, 4.53, 1.45, C.cyan);
-  addPill(slide, "尽早首响", 2.35, 4.53, 1.45, C.amber);
-  addPill(slide, "音画一致", 4.0, 4.53, 1.45, C.green);
 
-  addCard(slide, 6.65, 0.68, 6.05, 5.78, {
+  addCard(slide, 7.18, 0.54, 5.48, 6.18, {
     fillColor: C.panel3,
-    lineColor: C.cyan,
-    lineTransparency: 72,
+    lineColor: C.line,
+    lineTransparency: 8,
   });
+  slide.addText("MULTIMODAL  →  STREAMING RESPONSE", {
+    x: 7.53,
+    y: 0.84,
+    w: 4.72,
+    h: 0.22,
+    fontFace: FONT,
+    fontSize: 7.7,
+    bold: true,
+    color: C.cyan,
+    charSpacing: 1.25,
+    align: "center",
+    margin: 0,
+  });
+
+  const inputItems = [
+    { label: "面部", detail: "468 点几何", y: 1.48, color: C.green },
+    { label: "语音", detail: "韵律特征", y: 2.48, color: C.amber },
+    { label: "文本", detail: "语义分数", y: 3.48, color: C.blue },
+  ];
+  inputItems.forEach((item) => {
+    addCard(slide, 7.52, item.y, 1.32, 0.68, {
+      fillColor: C.panel2,
+      lineColor: item.color,
+      lineTransparency: 44,
+    });
+    slide.addText(item.label, {
+      x: 7.66,
+      y: item.y + 0.1,
+      w: 0.52,
+      h: 0.2,
+      fontFace: FONT,
+      fontSize: 10.5,
+      bold: true,
+      color: item.color,
+      margin: 0,
+    });
+    slide.addText(item.detail, {
+      x: 7.66,
+      y: item.y + 0.36,
+      w: 1.0,
+      h: 0.16,
+      fontFace: FONT,
+      fontSize: 6.8,
+      color: C.muted,
+      margin: 0,
+    });
+    addArrow(slide, 8.91, item.y + 0.34, 0.38, 0, item.color, 1.3);
+  });
+
   slide.addShape(pptx.ShapeType.roundRect, {
-    x: 6.87,
-    y: 0.92,
-    w: 5.61,
-    h: 3.25,
+    x: 9.36,
+    y: 1.28,
+    w: 2.6,
+    h: 3.38,
     rectRadius: 0.06,
-    line: { color: C.line, width: 1 },
+    line: { color: C.cyan, transparency: 65, width: 1 },
     fill: { color: C.bg2 },
   });
   slide.addImage(
     imageContainOptions(
-      path.join(assetDir, "system_interface.png"),
-      6.92,
-      0.97,
-      5.51,
-      3.15,
-      2000 / 1158,
+      path.join(assetDir, "avatar_idle.png"),
+      9.56,
+      1.42,
+      2.2,
+      2.82,
+      273 / 350,
     ),
   );
-  slide.addText("TRANSIT HUB DIGITAL HUMAN", {
-    x: 7.02,
-    y: 4.54,
-    w: 3.25,
-    h: 0.24,
+  slide.addText("DIGITAL HUMAN", {
+    x: 9.74,
+    y: 4.29,
+    w: 1.84,
+    h: 0.19,
     fontFace: FONT,
-    fontSize: 8.3,
+    fontSize: 6.8,
     bold: true,
-    charSpacing: 1.3,
+    charSpacing: 1.1,
+    color: C.cyan,
+    align: "center",
+    margin: 0,
+  });
+
+  addArrow(slide, 10.66, 4.75, 0, 0.33, C.cyan, 1.4);
+  addCard(slide, 8.6, 5.09, 4.02, 0.54, {
+    fillColor: C.panel2,
+    lineColor: C.cyan,
+    lineTransparency: 42,
+  });
+  slide.addText("融合情感", {
+    x: 8.82,
+    y: 5.19,
+    w: 0.98,
+    h: 0.22,
+    fontFace: FONT,
+    fontSize: 10.5,
+    bold: true,
     color: C.cyan,
     margin: 0,
   });
-  slide.addText("三模态感知 × 置信度融合 × 首响优先音画驱动", {
-    x: 7.0,
-    y: 4.88,
-    w: 4.88,
-    h: 0.5,
+  slide.addText("回复 · 语音 · 表情 · 动作", {
+    x: 10.0,
+    y: 5.2,
+    w: 2.3,
+    h: 0.2,
     fontFace: FONT,
-    fontSize: 15,
-    bold: true,
-    color: C.white,
-    margin: 0,
-  });
-  slide.addText("浏览器终端 · 本地模型 · 流式 WebSocket", {
-    x: 7.02,
-    y: 5.53,
-    w: 4.6,
-    h: 0.28,
-    fontFace: FONT,
-    fontSize: 10,
+    fontSize: 8.5,
     color: C.muted,
+    align: "right",
     margin: 0,
   });
-  slide.addShape(pptx.ShapeType.ellipse, {
-    x: 11.78,
-    y: 5.35,
-    w: 0.47,
-    h: 0.47,
-    line: { color: C.green, transparency: 60 },
-    fill: { color: C.green, transparency: 82 },
-  });
-  slide.addShape(pptx.ShapeType.ellipse, {
-    x: 11.94,
-    y: 5.51,
-    w: 0.15,
-    h: 0.15,
-    line: { color: C.green, transparency: 100 },
-    fill: { color: C.green },
-  });
+  addPill(slide, "首响", 9.06, 5.94, 1.2, C.amber);
+  addPill(slide, "同步", 10.83, 5.94, 1.2, C.green);
   addNotes(slide, slideSpec);
 }
 
