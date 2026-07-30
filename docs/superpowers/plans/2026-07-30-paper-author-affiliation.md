@@ -30,7 +30,7 @@
 
 **Interfaces:**
 - Consumes: the final LaTeX source and published dated PDF.
-- Produces: process exit 0 only when all approved source macros and first-page text are present in order, excluded author names are absent, and the PDF remains 14 pages.
+- Produces: process exit 0 only when all approved source macros and first-page text are present in order, excluded author names are absent, and the PDF is 15 pages after the official-template front-matter reflow.
 
 - [ ] **Step 1: Write the failing verifier**
 
@@ -50,7 +50,8 @@ EXPECTED_SOURCE = [
 ```
 
 The script must reject `徐浩延` and `Xu Haoyan` inside the four metadata
-fields. It must run `pdfinfo`, assert 14 pages, extract page 1 with
+fields. It must run `pdfinfo`, assert 15 pages after the official-template
+front-matter reflow, extract page 1 with
 `pdftotext -layout`, normalize whitespace, and require the five Chinese
 and five English names plus all six Chinese/English institution strings.
 
@@ -184,7 +185,10 @@ approved order, with no excluded author.
 
 - [ ] **Step 3: Confirm media metadata**
 
-Use `pdfinfo` to confirm A4 layout and 14 pages.
+Use `pdfinfo` to confirm A4 layout and 15 pages. The added author and
+affiliation rows fill the first page and naturally move the introduction to
+page 2; do not compress the official template to preserve the former 14-page
+count.
 
 - [ ] **Step 4: Record the final hash**
 
@@ -198,4 +202,3 @@ sha256sum paper/ChinaVR_Awatar_Final_20260730.pdf
 
 Keep `v2-new-version` and the current normal worktree unchanged; do not
 stage or commit the untracked `paper/` tree.
-

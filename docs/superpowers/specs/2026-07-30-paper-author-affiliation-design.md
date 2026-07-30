@@ -81,5 +81,6 @@ Compile twice with Tectonic and inspect the first page. Confirm:
 - the title and abstract remain unchanged;
 - no author line or affiliation line is clipped or overlaps adjacent text;
 - all references remain resolved and there are no fatal compilation errors;
-- the paper remains 14 pages if the added front matter fits without changing
-  the template's typography.
+- the paper is 15 pages because the added front matter does not fit without
+  moving the introduction to page 2; preserve the official template's
+  typography rather than compressing it to force the previous 14-page count.
