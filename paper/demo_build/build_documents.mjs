@@ -1395,9 +1395,19 @@ async function buildNarrationDocument() {
   const interfaceImage = await readFile(
     path.join(assetDir, "system_interface.png"),
   );
+  const durationManifest = JSON.parse(
+    await readFile(path.join(buildDir, "audio", "durations.json"), "utf8"),
+  );
+  const measuredDurations = new Map(
+    durationManifest.clips.map((clip) => [clip.slide, clip.seconds]),
+  );
   const children = [];
 
   SLIDES.forEach((slideSpec, index) => {
+    const measuredSeconds = measuredDurations.get(slideSpec.number);
+    if (typeof measuredSeconds !== "number") {
+      throw new Error(`missing measured duration for slide ${slideSpec.number}`);
+    }
     children.push(
       new Paragraph({
         pageBreakBefore: index > 0,
@@ -1421,6 +1431,13 @@ async function buildNarrationDocument() {
             bold: true,
             size: 21,
             color: "0891B2",
+          }),
+          new TextRun({
+            text: `　｜　实测配音：${measuredSeconds.toFixed(3)} 秒`,
+            font: FONT,
+            bold: true,
+            size: 21,
+            color: "B45309",
           }),
           new TextRun({
             text: "　｜　匿名审稿视频",
@@ -1481,7 +1498,7 @@ async function buildNarrationDocument() {
         spacing: { before: 180 },
         children: [
           new TextRun({
-            text: `字数：${slideSpec.narration.replace(/[，。；：、,.!?！？\s]/g, "").length}　｜　最终实测配音时长将在成片阶段校准`,
+            text: `字数：${slideSpec.narration.replace(/[，。；：、,.!?！？\s]/g, "").length}　｜　页间安全停顿：0.60 秒`,
             font: FONT,
             size: 18,
             color: "94A3B8",
@@ -1544,4 +1561,23 @@ async function main() {
   console.log(`wrote ${path.relative(rootDir, DOCX_PATH)}`);
 }
 
-await main();
+async function exportNarration() {
+  const audioDir = path.join(buildDir, "audio");
+  await mkdir(audioDir, { recursive: true });
+  await Promise.all(
+    SLIDES.map((slideSpec) =>
+      writeFile(
+        path.join(audioDir, `slide_${slideSpec.number}.txt`),
+        `${slideSpec.narration}\n`,
+        "utf8",
+      ),
+    ),
+  );
+  console.log(`exported ${SLIDES.length} narration text files`);
+}
+
+if (process.argv.includes("--export-narration")) {
+  await exportNarration();
+} else {
+  await main();
+}

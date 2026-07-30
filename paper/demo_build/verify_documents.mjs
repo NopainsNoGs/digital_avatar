@@ -22,9 +22,13 @@ const slides = pptxArchive
 assert.equal(slides.length, 6, "PPTX must contain exactly 6 slides");
 
 const docxArchive = new AdmZip(docx);
-assert.ok(
-  docxArchive.getEntry("word/document.xml"),
-  "DOCX word/document.xml missing",
+const documentEntry = docxArchive.getEntry("word/document.xml");
+assert.ok(documentEntry, "DOCX word/document.xml missing");
+const documentXml = documentEntry.getData().toString("utf8");
+assert.equal(
+  documentXml.match(/实测配音：/g)?.length ?? 0,
+  6,
+  "DOCX must record the measured narration duration for all six slides",
 );
 const stylesXml = docxArchive
   .readAsText("word/styles.xml");
