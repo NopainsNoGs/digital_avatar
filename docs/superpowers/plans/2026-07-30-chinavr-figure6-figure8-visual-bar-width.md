@@ -4,7 +4,7 @@
 
 **Goal:** Make the displayed bar widths in Figure 6 and Figure 8 differ by no more than 1 px while preserving their current layouts and all paper content.
 
-**Architecture:** Keep the existing figure dimensions and LaTeX insertion widths. Introduce a Figure-6-specific data-coordinate bar width of `0.23`, because Figure 6 has four category groups while Figure 8 has six; verify the result in display coordinates through Matplotlib's renderer rather than comparing only data-coordinate widths.
+**Architecture:** Keep the existing figure dimensions and LaTeX insertion widths. Introduce a Figure-6-specific data-coordinate bar width of `0.218`, because Figure 6 has four category groups while Figure 8 has six and Matplotlib adds automatic x-axis margins; verify the result in display coordinates through Matplotlib's renderer rather than comparing only data-coordinate widths.
 
 **Tech Stack:** Python 3.10, Matplotlib, `unittest`, Tectonic, Poppler.
 
@@ -30,7 +30,7 @@
 
 - [ ] **Step 1: Write the failing test**
 
-Update the TTFA structural expectation from `0.32` to `0.23`, then add:
+Update the TTFA structural expectation from `0.32` to `0.218`, then add:
 
 ```python
 def test_ttfa_and_user_study_bars_have_matching_display_width(self) -> None:
@@ -90,14 +90,14 @@ Expected: FAIL because Figure 6 is still approximately `33.8 px`, Figure 8 appro
 
 **Interfaces:**
 - Consumes: the current grouped-bar plotting implementation.
-- Produces: `TTFA_GROUPED_BAR_WIDTH = 0.23`, used only by `plot_ttfa_results`.
+- Produces: `TTFA_GROUPED_BAR_WIDTH = 0.218`, used only by `plot_ttfa_results`.
 
 - [ ] **Step 1: Add the Figure 6 width constant**
 
 Add beside the shared bar constants:
 
 ```python
-TTFA_GROUPED_BAR_WIDTH = 0.23
+TTFA_GROUPED_BAR_WIDTH = 0.218
 ```
 
 - [ ] **Step 2: Use the constant for both Figure 6 series**
