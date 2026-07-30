@@ -11,7 +11,9 @@
 ## Global Constraints
 
 - The first page must display `文章编号：25`.
-- Page 9 must contain Table 3, Figure 4, and Section 3.5 manuscript prose.
+- Page 8 must contain the Section 3.5 heading and opening sentence.
+- Page 9 must contain Table 3, Figure 4, and the Section 3.5 continuation
+  `样本推理中 CPU 免除了主机与设备之间的数据传输`.
 - Every PDF page must contain manuscript prose rather than only floating tables or figures.
 - Keep Figure 4 at `0.86\linewidth`; do not change its asset, caption, label, data, or chart styling.
 - Keep Table 3 contents, caption, label, and tabular formatting unchanged.
@@ -71,18 +73,25 @@ assert (
 )
 ```
 
+Extract page 8 with `pdftotext -layout` and require:
+
+```python
+assert "3.5" in page_eight
+assert "模块计算效率" in page_eight
+assert "规则文本和自适应融合" in page_eight
+```
+
 Extract page 9 with `pdftotext -layout` and require:
 
 ```python
 assert "表3" in page_nine or "表 3" in page_nine
 assert "图4" in page_nine or "图 4" in page_nine
-assert "3.5" in page_nine
-assert "模块计算效率" in page_nine
-assert "规则文本和自适应融合" in page_nine
+assert "样本推理中 CPU 免除了主机与设备之间的数据传输" in page_nine
 ```
 
-These checks prove that page 9 contains the expected floats and body prose
-rather than only Table 3 and Figure 4.
+These checks preserve the natural split: the Section 3.5 heading and opening
+remain on page 8, while page 9 contains the expected floats and the continuation
+of the body prose rather than only Table 3 and Figure 4.
 
 - [ ] **Step 3: Run both verifiers and confirm RED**
 
@@ -187,10 +196,11 @@ pdftotext -f 1 -l 1 -layout main.pdf -
 pdftotext -f 8 -l 10 -layout main.pdf -
 ```
 
-Require A4, 15 pages, `文章编号：25` on page 1, the retained page-8 content,
-and Section 3.5 body prose on page 9. If the natural pagination differs from
-15 pages, stop and diagnose which float or paragraph moved before publishing;
-do not force the count by changing typography.
+Require A4, 14 pages, `文章编号：25` on page 1, the retained page-8 content
+including the Section 3.5 heading/opening sentence, and Table 3, Figure 4, plus
+the Section 3.5 continuation on page 9. The 14-page result is the authorized
+natural pagination after removing the dedicated float page; do not force an
+extra page by changing typography.
 
 - [ ] **Step 6: Publish the candidate**
 
@@ -282,10 +292,11 @@ page 10 starts naturally.
 
 - [ ] **Step 4: Render a full-document contact sheet**
 
-Render all 15 pages at 90 dpi, then create a 5-by-3 contact sheet:
+Render pages 1--14 at 90 dpi, then create a 5-by-3 contact sheet. The fifteenth
+cell is intentionally blank:
 
 ```bash
-pdftoppm -f 1 -l 15 -png -r 90 \
+pdftoppm -f 1 -l 14 -png -r 90 \
   paper/ChinaVR_Awatar_Final_20260730.pdf \
   /tmp/chinavr_float_fix/all
 montage /tmp/chinavr_float_fix/all-*.png \
