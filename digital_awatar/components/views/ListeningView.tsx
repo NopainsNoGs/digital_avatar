@@ -7,6 +7,8 @@ interface ListeningViewProps {
   onFinish: (transcript: string) => void;
 }
 
+const WAVEFORM_HEIGHTS = [18, 31, 24, 43, 28, 49, 35, 46, 26, 41, 30, 47, 23, 37, 20];
+
 export default function ListeningView({ onFinish }: ListeningViewProps) {
   const [text, setText] = useState('');
   const mockTranscription = "我找不到行李转盘了，等了半个小时，你们怎么回事啊！";
@@ -33,10 +35,10 @@ export default function ListeningView({ onFinish }: ListeningViewProps) {
         
         {/* 底部动态波形环 */}
         <div className="absolute bottom-12 flex items-end gap-1 h-12">
-          {[...Array(15)].map((_, i) => (
+          {WAVEFORM_HEIGHTS.map((height, i) => (
             <motion.div 
               key={i}
-              animate={{ height: [10, Math.random() * 40 + 10, 10] }}
+              animate={{ height: [10, height, 10] }}
               transition={{ duration: 0.5, repeat: Infinity, delay: i * 0.05 }}
               className="w-1.5 bg-hub-cyan rounded-t-full"
             />

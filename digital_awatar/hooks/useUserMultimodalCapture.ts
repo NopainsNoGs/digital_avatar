@@ -20,20 +20,35 @@ type FaceMeshInstance = {
   close?: () => Promise<void>;
 };
 
+type NativeFaceDetectorInstance = {
+  detect: (image: HTMLVideoElement) => Promise<unknown[]>;
+};
+
 type BrowserWindow = Window & typeof globalThis & {
   FaceMesh?: new (config: { locateFile: (file: string) => string }) => FaceMeshInstance;
+  FaceDetector?: new (options?: { fastMode?: boolean; maxDetectedFaces?: number }) => NativeFaceDetectorInstance;
   webkitAudioContext?: typeof AudioContext;
 };
 
-const FACE_MESH_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js';
+const FACE_MESH_SCRIPT_SOURCES = [
+  process.env.NEXT_PUBLIC_FACE_MESH_SCRIPT_URL,
+  'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js',
+  'https://unpkg.com/@mediapipe/face_mesh/face_mesh.js',
+].filter((source): source is string => Boolean(source));
+
+function resolveScriptBaseUrl(scriptUrl: string) {
+  return scriptUrl.slice(0, scriptUrl.lastIndexOf('/') + 1);
+}
 
 export function useUserMultimodalCapture() {
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const activeStreamRef = useRef<MediaStream | null>(null);
   const faceMeshRef = useRef<FaceMeshInstance | null>(null);
   const faceMeshPromiseRef = useRef<Promise<FaceMeshInstance | null> | null>(null);
+  const faceMeshAssetBaseUrlRef = useRef('');
   const faceLoopFrameRef = useRef<number | null>(null);
   const faceProcessingRef = useRef(false);
+  const nativeFaceDetectorRef = useRef<NativeFaceDetectorInstance | null>(null);
   const micAudioContextRef = useRef<AudioContext | null>(null);
   const micAnalyserRef = useRef<AnalyserNode | null>(null);
   const micLoopFrameRef = useRef<number | null>(null);
@@ -73,6 +88,23 @@ export function useUserMultimodalCapture() {
     setLiveUserEmotion(null);
   };
 
+  const publishFallbackFacialSignal = (sampleCount: number) => {
+    const scores = createEmotionScores();
+    scores.neutral = 1;
+    accumulateEmotionScores(faceScoreTotalRef.current, scores);
+    faceSampleCountRef.current += 1;
+
+    setLiveUserEmotion((previous) => ({
+      ...previous,
+      facialEmotion: {
+        emotion: 'neutral',
+        confidence: 0.25,
+        scores,
+        sampleCount: Math.max(sampleCount, faceSampleCountRef.current),
+      },
+    }));
+  };
+
   const loadScript = async (src: string) => {
     if (typeof window === 'undefined') {
       return;
@@ -87,9 +119,31 @@ export function useUserMultimodalCapture() {
       script.src = src;
       script.async = true;
       script.onload = () => resolve();
-      script.onerror = () => reject(new Error(`加载脚本失败: ${src}`));
+      script.onerror = () => {
+        script.remove();
+        reject(new Error(`加载脚本失败: ${src}`));
+      };
       document.head.appendChild(script);
     });
+  };
+
+  const loadFaceMeshRuntime = async () => {
+    let lastError: unknown = null;
+
+    for (const source of FACE_MESH_SCRIPT_SOURCES) {
+      try {
+        await loadScript(source);
+        if ((window as BrowserWindow).FaceMesh) {
+          faceMeshAssetBaseUrlRef.current = resolveScriptBaseUrl(source);
+          return true;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    console.warn('MediaPipe FaceMesh 加载失败:', lastError);
+    return false;
   };
 
   const ensureFaceMesh = async () => {
@@ -106,7 +160,10 @@ export function useUserMultimodalCapture() {
     }
 
     faceMeshPromiseRef.current = (async () => {
-      await loadScript(FACE_MESH_SCRIPT_URL);
+      const faceMeshReady = await loadFaceMeshRuntime();
+      if (!faceMeshReady) {
+        return null;
+      }
 
       const FaceMeshCtor = (window as BrowserWindow).FaceMesh;
       if (!FaceMeshCtor) {
@@ -114,7 +171,7 @@ export function useUserMultimodalCapture() {
       }
 
       const faceMesh = new FaceMeshCtor({
-        locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
+        locateFile: (file: string) => `${faceMeshAssetBaseUrlRef.current}${file}`,
       });
 
       faceMesh.setOptions({
@@ -152,6 +209,71 @@ export function useUserMultimodalCapture() {
     return faceMeshPromiseRef.current;
   };
 
+  const ensureNativeFaceDetector = () => {
+    if (nativeFaceDetectorRef.current) {
+      return nativeFaceDetectorRef.current;
+    }
+
+    const FaceDetectorCtor = (window as BrowserWindow).FaceDetector;
+    if (!FaceDetectorCtor) {
+      return null;
+    }
+
+    try {
+      nativeFaceDetectorRef.current = new FaceDetectorCtor({ fastMode: true, maxDetectedFaces: 1 });
+      return nativeFaceDetectorRef.current;
+    } catch (error) {
+      console.warn('浏览器原生 FaceDetector 初始化失败:', error);
+      return null;
+    }
+  };
+
+  const startFaceFallbackLoop = (videoElement: HTMLVideoElement) => {
+    const nativeFaceDetector = ensureNativeFaceDetector();
+    let fallbackTickCount = 0;
+
+    const tick = () => {
+      if (!isCapturingRef.current) {
+        stopFaceLoop();
+        return;
+      }
+
+      if (videoElement.readyState >= 2 && videoElement.videoWidth > 0 && !faceProcessingRef.current) {
+        faceProcessingRef.current = true;
+        fallbackTickCount += 1;
+
+        const publishNeutralPresence = () => {
+          if (fallbackTickCount % 12 === 0) {
+            publishFallbackFacialSignal(fallbackTickCount);
+          }
+        };
+
+        if (nativeFaceDetector) {
+          void nativeFaceDetector.detect(videoElement)
+            .then((faces) => {
+              if (faces.length > 0) {
+                publishNeutralPresence();
+              }
+            })
+            .catch((error) => {
+              console.warn('FaceDetector 单帧处理失败:', error);
+              publishNeutralPresence();
+            })
+            .finally(() => {
+              faceProcessingRef.current = false;
+            });
+        } else {
+          publishNeutralPresence();
+          faceProcessingRef.current = false;
+        }
+      }
+
+      faceLoopFrameRef.current = requestAnimationFrame(tick);
+    };
+
+    faceLoopFrameRef.current = requestAnimationFrame(tick);
+  };
+
   const attachPreview = async (stream: MediaStream) => {
     const videoElement = cameraVideoRef.current;
     if (!videoElement || stream.getVideoTracks().length === 0) {
@@ -177,8 +299,13 @@ export function useUserMultimodalCapture() {
     }
 
     const faceMesh = await ensureFaceMesh();
+    if (!isCapturingRef.current) {
+      return;
+    }
+
     if (!faceMesh) {
-      setCaptureError('面部识别模型加载失败，已退回到仅语音与文本情绪判别');
+      setCaptureError('面部关键点模型加载失败，已使用摄像头存在性作为 Face 兜底信号');
+      startFaceFallbackLoop(videoElement);
       return;
     }
 
@@ -188,7 +315,7 @@ export function useUserMultimodalCapture() {
         return;
       }
 
-      if (videoElement.readyState >= 2 && !faceProcessingRef.current) {
+      if (videoElement.readyState >= 2 && videoElement.videoWidth > 0 && !faceProcessingRef.current) {
         faceProcessingRef.current = true;
         void faceMesh.send({ image: videoElement })
           .catch((error: unknown) => {
@@ -300,6 +427,7 @@ export function useUserMultimodalCapture() {
 
     activeStreamRef.current = stream;
     isCapturingRef.current = true;
+    // eslint-disable-next-line react-hooks/purity -- User-triggered capture needs a monotonic runtime timestamp.
     captureStartedAtRef.current = performance.now();
 
     await attachPreview(stream);
@@ -347,6 +475,8 @@ export function useUserMultimodalCapture() {
   };
 
   useEffect(() => {
+    void ensureFaceMesh();
+
     return () => {
       void stopCapture();
     };

@@ -1,10 +1,11 @@
 'use client';
 
 import { AnimatePresence, motion } from 'framer-motion';
-import { useState } from 'react';
-import Live2DAvatar from '@/components/Live2DAvatar';
-import type { AvatarViewMode } from '@/components/Live2DAvatar';
+import { useRef, useState } from 'react';
+import AvatarController from '@/components/avatar/AvatarController';
 import { useTerminalSocket } from '@/hooks/useTerminalSocket';
+import { createAvatarBehavior } from '@/lib/avatarBehavior';
+import type { AvatarRendererKind, AvatarViewMode } from '@/types/avatar';
 
 const EMOTION_LABELS: Record<string, string> = {
   neutral: '平稳',
@@ -29,6 +30,14 @@ const TERMINAL_STATUS_LABELS: Record<string, string> = {
   THINKING: '意图分析中',
   SPEAKING: '数字人播报中',
   ERROR: '服务异常',
+};
+
+const ACTION_LABELS: Record<string, string> = {
+  explain: '讲解',
+  point: '指引',
+  comfort: '安抚',
+  alert: '提醒',
+  confirm: '确认',
 };
 
 function resolveSocketUrl() {
@@ -63,13 +72,17 @@ function SignalTile({
 
 export default function TerminalPage() {
   const socketUrl = resolveSocketUrl();
+  const [avatarRenderer, setAvatarRenderer] = useState<AvatarRendererKind>('live2d');
   const [avatarViewMode, setAvatarViewMode] = useState<AvatarViewMode>('half');
+  const recordingPointerIdRef = useRef<number | null>(null);
   const {
     status,
     currentResponse,
     visibleReplyText,
     mouthOpenRef,
+    mouthFormRef,
     avatarVisemeTrackRef,
+    avatarSpeechSegmentsRef,
     avatarSpeechTimeRef,
     avatarSpeakingRef,
     cameraVideoRef,
@@ -81,7 +94,20 @@ export default function TerminalPage() {
     resetTerminal,
   } = useTerminalSocket(socketUrl);
 
-  const avatarEmotion = currentResponse?.emotionMode || 'neutral';
+  const avatarBehavior = createAvatarBehavior({
+    status,
+    response: currentResponse,
+    speech: {
+      visemeTrackRef: avatarVisemeTrackRef,
+      segmentTimingsRef: avatarSpeechSegmentsRef,
+      speechTimeRef: avatarSpeechTimeRef,
+      speakingRef: avatarSpeakingRef,
+      mouthOpenRef,
+      mouthFormRef,
+    },
+  });
+  const avatarEmotion = avatarBehavior.emotion;
+  const avatarAction = avatarBehavior.gesture;
   const fusedEmotion = currentResponse?.userEmotionAnalysis?.finalEmotion || liveUserEmotion?.facialEmotion?.emotion || 'neutral';
   const statusLabel = TERMINAL_STATUS_LABELS[status] || status;
   const captureLabel = CAPTURE_LABELS[captureState] || captureState;
@@ -136,6 +162,30 @@ export default function TerminalPage() {
                     <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-[11px] tracking-[0.2em] text-white/60">
                       口播风格 {EMOTION_LABELS[avatarEmotion] || avatarEmotion}
                     </span>
+                    <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-[11px] tracking-[0.2em] text-white/60">
+                      动作 {ACTION_LABELS[avatarAction] || avatarAction}
+                    </span>
+                    <div
+                      className="flex rounded-full border border-white/10 bg-black/25 p-0.5"
+                      role="group"
+                      aria-label="Avatar renderer"
+                    >
+                      {(['live2d', 'vrm'] as const).map((renderer) => (
+                        <button
+                          key={renderer}
+                          type="button"
+                          onClick={() => setAvatarRenderer(renderer)}
+                          aria-pressed={avatarRenderer === renderer}
+                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors ${
+                            avatarRenderer === renderer
+                              ? 'bg-cyan-300/18 text-cyan-100'
+                              : 'text-white/45 hover:text-white/75'
+                          }`}
+                        >
+                          {renderer}
+                        </button>
+                      ))}
+                    </div>
                     <button
                       type="button"
                       onClick={() => setAvatarViewMode((mode) => (mode === 'half' ? 'full' : 'half'))}
@@ -153,14 +203,10 @@ export default function TerminalPage() {
 
                   <div className="relative z-10 flex h-full items-center justify-center px-4 py-12 md:px-8 md:py-14">
                     <div className="relative w-full max-w-[400px] aspect-[4/5] min-h-[420px]">
-                      <Live2DAvatar
-                        status={status}
-                        emotion={avatarEmotion}
+                      <AvatarController
+                        renderer={avatarRenderer}
+                        behavior={avatarBehavior}
                         viewMode={avatarViewMode}
-                        mouthOpenRef={mouthOpenRef}
-                        visemeTrackRef={avatarVisemeTrackRef}
-                        speechTimeRef={avatarSpeechTimeRef}
-                        speakingRef={avatarSpeakingRef}
                       />
 
                       {status === 'THINKING' && (
@@ -326,7 +372,7 @@ export default function TerminalPage() {
                       <p className="mt-1 text-sm text-white/65">收音、重置与线下终端状态控制</p>
                     </div>
                     <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] tracking-[0.18em] text-white/55">
-                      {EMOTION_LABELS[avatarEmotion] || avatarEmotion}
+                      {ACTION_LABELS[avatarAction] || avatarAction}
                     </span>
                   </div>
 
@@ -343,18 +389,47 @@ export default function TerminalPage() {
                     </button>
 
                     <button
-                      onMouseDown={startRecording}
-                      onMouseUp={stopRecording}
-                      onMouseLeave={stopRecording}
-                      onTouchStart={startRecording}
-                      onTouchEnd={stopRecording}
-                      onTouchCancel={stopRecording}
+                      onPointerDown={(event) => {
+                        if (
+                          !event.isPrimary
+                          || (event.pointerType === 'mouse' && event.button !== 0)
+                          || recordingPointerIdRef.current !== null
+                        ) {
+                          return;
+                        }
+
+                        recordingPointerIdRef.current = event.pointerId;
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        void startRecording();
+                      }}
+                      onPointerUp={(event) => {
+                        if (recordingPointerIdRef.current !== event.pointerId) {
+                          return;
+                        }
+
+                        recordingPointerIdRef.current = null;
+                        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                          event.currentTarget.releasePointerCapture(event.pointerId);
+                        }
+                        stopRecording();
+                      }}
+                      onPointerCancel={(event) => {
+                        if (recordingPointerIdRef.current !== event.pointerId) {
+                          return;
+                        }
+
+                        recordingPointerIdRef.current = null;
+                        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                          event.currentTarget.releasePointerCapture(event.pointerId);
+                        }
+                        stopRecording();
+                      }}
                       onContextMenu={(event) => event.preventDefault()}
                       onDragStart={(event) => event.preventDefault()}
                       className={`flex h-14 flex-1 items-center justify-center rounded-full px-6 text-sm font-semibold tracking-[0.24em] text-white transition-all duration-300 select-none touch-none ${
                         status === 'LISTENING'
                           ? 'bg-gradient-to-r from-rose-500 to-orange-500 shadow-[0_0_34px_rgba(251,113,133,0.45)]'
-                          : 'bg-gradient-to-r from-cyan-500 to-blue-600 shadow-[0_0_34px_rgba(34,211,238,0.28)] hover:scale-[1.02]'
+                          : 'bg-gradient-to-r from-cyan-500 to-blue-600 shadow-[0_0_34px_rgba(34,211,238,0.28)] hover:brightness-110'
                       }`}
                     >
                       {status === 'LISTENING' ? '松开发送' : '按住说话'}

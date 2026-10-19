@@ -1,0 +1,79 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "kefu3.moc3",
+    "Textures": [
+      "kefu3.1024/texture_00.png"
+    ],
+    "Physics": "kefu3.physics3.json",
+    "DisplayInfo": "kefu3.cdi3.json",
+    "Motions": {
+      "Idle": [
+        {
+          "File": "wait.motion3.json",
+          "Name": "waiting"
+        }
+      ],
+      "Welcome": [
+        {
+          "File": "welcome.motion3.json",
+          "Name": "welcome"
+        }
+      ],
+      "GuideLeft": [
+        {
+          "File": "guide left.motion3.json",
+          "Name": "guide_left"
+        }
+      ],
+      "GuideRight": [
+        {
+          "File": "guide right.motion3.json",
+          "Name": "guide_right"
+        }
+      ],
+      "Explain": [
+        {
+          "File": "explain.motion3.json",
+          "Name": "explain"
+        }
+      ],
+      "Confirm": [
+        {
+          "File": "confirm.motion3.json",
+          "Name": "confirm"
+        }
+      ],
+      "Comfort": [
+        {
+          "File": "comfort.motion3.json",
+          "Name": "comfort"
+        }
+      ],
+      "Alert": [
+        {
+          "File": "alert.motion3.json",
+          "Name": "alert"
+        }
+      ],
+      "Goodbye": [
+        {
+          "File": "goodbye.motion3.json",
+          "Name": "goodbye"
+        }
+      ]
+    }
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": []
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		}
+	]
+}

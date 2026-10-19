@@ -1,0 +1,52 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "kefu2.moc3",
+		"Textures": [
+			"kefu2.1024/texture_00.png"
+		],
+		"Physics": "kefu2.physics3.json",
+		"DisplayInfo": "kefu2.cdi3.json",
+		"Motions": {
+			"": [
+				{
+					"File": "daiji.motion3.json",
+					"Name": "daiji"
+				},
+				{
+					"File": "shuohua.motion3.json",
+					"Name": "shuohua"
+				},
+				{
+					"File": "youdahui01.motion3.json",
+					"Name": "youdahui01"
+				},
+				{
+					"File": "youzhonghui01.motion3.json",
+					"Name": "youzhonghui01"
+				},
+				{
+					"File": "shentihuangdong01.motion3.json",
+					"Name": "shentihuangdong"
+				}
+			]
+		}
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"ParamEyeLOpen",
+				"ParamEyeROpen"
+			]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": [
+				"ParamMouthOpenY"
+			]
+		}
+	]
+}

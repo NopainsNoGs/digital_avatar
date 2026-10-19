@@ -4,6 +4,7 @@
 export type TerminalState = 'IDLE' | 'LISTENING' | 'THINKING' | 'SPEAKING' | 'ERROR';
 export type EmotionMode = 'neutral' | 'smile' | 'shy' | 'sad' | 'angry' | 'surprised';
 export type EmotionScores = Record<EmotionMode, number>;
+export type Live2DAction = 'explain' | 'point' | 'comfort' | 'alert' | 'confirm';
 
 export interface VisemeFrame {
   t: number;
@@ -75,7 +76,7 @@ export interface AgentResponse {
   visemeTrack?: VisemeFrame[]; // 口型序列 (Live2D)
   emotionMode?: EmotionMode | string; // 椿的口播 / 表情风格
   actionCard?: ActionCard | null; // 业务弹卡 (可选)
-  live2dAction?: string;    // 传给 Live2D 的动作指令 (如: "nod", "smile")
+  live2dAction?: Live2DAction | string; // 传给 Live2D 的动作指令
   userEmotionAnalysis?: UserEmotionAnalysis | null; // 用户多模态情绪融合结果
   videoUrl?: string | null; // 视频流
 }

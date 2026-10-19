@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Browser-delivered model runtimes are vendor assets, not application source.
+    "public/**",
   ]),
 ]);
 

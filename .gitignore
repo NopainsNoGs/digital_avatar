@@ -37,3 +37,7 @@ hub_backend/CosyVoice/pretrained_models/
 *.mp4
 hub_backend/temp_record.webm
 hub_backend/static/*.wav
+
+# Keep the curated VRM Lab narration samples in version control.
+!digital_awatar/public/vrm-demo-audio/
+!digital_awatar/public/vrm-demo-audio/*.wav

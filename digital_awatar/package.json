@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@hazart-pkg/live2d-core": "^1.0.1",
@@ -29,7 +30,9 @@
     "autoprefixer": "^10.5.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
+    "patch-package": "^8.0.1",
     "postcss": "^8.5.10",
+    "postinstall-postinstall": "^2.1.0",
     "tailwindcss": "^4.2.3",
     "typescript": "^5"
   }

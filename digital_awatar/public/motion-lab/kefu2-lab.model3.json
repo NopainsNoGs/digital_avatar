@@ -1,0 +1,68 @@
+{
+  "Version": 3,
+  "FileReferences": {
+    "Moc": "../wuhan1/kefu2.moc3",
+    "Textures": [
+      "../wuhan1/kefu2.1024/texture_00.png"
+    ],
+    "Physics": "../wuhan1/kefu2.physics3.json",
+    "DisplayInfo": "../wuhan1/kefu2.cdi3.json",
+    "Motions": {
+      "Idle": [
+        {
+          "File": "../wuhan1/daiji.motion3.json",
+          "Name": "idle"
+        }
+      ],
+      "Generated": [
+        {
+          "File": "../generated-motions/point_right.motion3.json",
+          "Name": "point_right"
+        },
+        {
+          "File": "../generated-motions/point_front.motion3.json",
+          "Name": "point_front"
+        },
+        {
+          "File": "../generated-motions/comfort.motion3.json",
+          "Name": "comfort"
+        }
+      ],
+      "Existing": [
+        {
+          "File": "../wuhan1/greet.motion3.json",
+          "Name": "greet"
+        },
+        {
+          "File": "../wuhan1/present.motion3.json",
+          "Name": "present"
+        },
+        {
+          "File": "../wuhan1/youzhonghui01.motion3.json",
+          "Name": "confirm_candidate"
+        },
+        {
+          "File": "../wuhan1/youdahui01.motion3.json",
+          "Name": "alert_candidate"
+        }
+      ]
+    }
+  },
+  "Groups": [
+    {
+      "Target": "Parameter",
+      "Name": "EyeBlink",
+      "Ids": [
+        "ParamEyeLOpen",
+        "ParamEyeROpen"
+      ]
+    },
+    {
+      "Target": "Parameter",
+      "Name": "LipSync",
+      "Ids": [
+        "ParamMouthOpenY"
+      ]
+    }
+  ]
+}

@@ -1,26 +1,38 @@
 import asyncio
 import contextlib
+import datetime
+import functools
 import json
 import os
 import re
-import struct
 import sys
 import threading
 import time
 import uuid
 from typing import Any
-import httpx
 import numpy as np
 import torch
 import torchaudio.transforms as T
+from dialogue import DialogueProvider, create_dialogue_provider
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from funasr import AutoModel
-from openai import AsyncOpenAI
+from protocol import pack_binary_event
 
 
 VISEME_FPS = 60
+
+
+@functools.lru_cache(maxsize=4)
+def get_viseme_mel_transform(sample_rate: int, fps: int) -> T.MelSpectrogram:
+    """Cache the stateless Mel transform reused by consecutive TTS chunks."""
+    return T.MelSpectrogram(
+        sample_rate=sample_rate,
+        n_fft=1024,
+        hop_length=sample_rate // fps,
+        n_mels=80,
+    ).cpu()
 
 
 def build_viseme_track(audio_tensor, sample_rate=22050, fps=VISEME_FPS, time_offset=0.0, verbose=False):
@@ -46,12 +58,7 @@ def build_viseme_track(audio_tensor, sample_rate=22050, fps=VISEME_FPS, time_off
         audio_tensor = audio_tensor.mean(dim=0, keepdim=True)
 
     # Mel 频谱用于估计音量和频段分布，再映射到嘴部开合与口型形态。
-    mel_transform = T.MelSpectrogram(
-        sample_rate=sample_rate,
-        n_fft=1024,
-        hop_length=sample_rate // fps,
-        n_mels=80,
-    ).cpu()
+    mel_transform = get_viseme_mel_transform(sample_rate, fps)
 
     if verbose:
         print("   -> [后台线程] 正在进行梅尔频谱数学变换 (最耗时步骤)...")
@@ -143,7 +150,8 @@ EARLY_FORCE_SPLIT_MAX_WAIT_SEC = 0.35
 EARLY_FORCE_SPLIT_OPENING_PHRASES: tuple[str, ...] = ()
 LLM_KEEPALIVE_INTERVAL_SEC = 240
 TTS_SPK_ID = os.getenv("COSYVOICE_SPK_ID", "中文女")
-LLM_MODEL_NAME = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+MIN_AUDIO_PACKET_BYTES = 256
+PAPER_RUNTIME_LOG = os.getenv("PAPER_RUNTIME_LOG", "").strip()
 DEFAULT_ASR_DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 ASR_DEVICE = os.getenv("FUNASR_DEVICE", DEFAULT_ASR_DEVICE).strip() or DEFAULT_ASR_DEVICE
 EMOTION_MODE_SEQUENCE = ("neutral", "smile", "shy", "sad", "angry", "surprised")
@@ -154,6 +162,22 @@ USER_MODALITY_BASE_WEIGHTS = {
     "prosody": 0.25,
     "text": 0.40,
 }
+
+
+def append_paper_runtime_record(record: dict[str, Any]) -> None:
+    """Append one measured interaction record when paper logging is enabled."""
+    if not PAPER_RUNTIME_LOG:
+        return
+
+    output_path = os.path.abspath(PAPER_RUNTIME_LOG)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    payload = {
+        "recordType": "measured_interaction",
+        "recordedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        **record,
+    }
+    with open(output_path, "a", encoding="utf-8") as output_file:
+        output_file.write(json.dumps(payload, ensure_ascii=False) + "\n")
 TEXT_EMOTION_KEYWORDS: dict[str, tuple[tuple[str, float], ...]] = {
     "smile": (
         ("谢谢", 1.2),
@@ -260,42 +284,14 @@ print("正在加载 CosyVoice (嘴巴) ... (第一次运行会自动下载约 3G
 cosyvoice_model_path = resolve_local_model_path("CosyVoice-300M-SFT")
 tts_model = CosyVoice(cosyvoice_model_path)
 
+dialogue_provider: DialogueProvider = create_dialogue_provider()
+# 保留论文运行日志中的既有模型字段语义，实际值由 provider 提供。
+LLM_MODEL_NAME = dialogue_provider.model_name
+
 print("✅ 所有感官器官加载完毕！")
 print(f"🧠 当前主 LLM 模型: {LLM_MODEL_NAME}")
 
-custom_http_client = httpx.AsyncClient(trust_env=False)
-llm_client = AsyncOpenAI(
-    api_key="ollama",
-    base_url="http://localhost:11434/v1",
-    http_client=custom_http_client,
-)
 llm_keepalive_task: asyncio.Task | None = None
-
-
-async def warm_up_llm_model(reason: str) -> None:
-    """
-    通过一次极小请求把 Ollama 里的 Qwen 先拉进显存，避免首个旅客触发冷启动。
-
-    参数:
-        reason: 预热触发来源，写入日志用于区分 startup 和 keepalive。
-    """
-    print(f"♨️ 正在预热 LLM ({reason}) ...")
-    try:
-        await asyncio.wait_for(
-            llm_client.chat.completions.create(
-                model=LLM_MODEL_NAME,
-                temperature=0.0,
-                max_tokens=8,
-                messages=[
-                    {"role": "system", "content": "你是系统预热请求，只回复一个字。"},
-                    {"role": "user", "content": "好"},
-                ],
-            ),
-            timeout=120,
-        )
-        print(f"♨️ LLM 预热完成 ({reason})")
-    except Exception as exc:
-        print(f"⚠️ LLM 预热失败 ({reason}): {exc}")
 
 
 def warm_up_tts_model() -> None:
@@ -316,14 +312,14 @@ def warm_up_tts_model() -> None:
 
 async def maintain_llm_keepalive() -> None:
     """
-    周期性唤醒 Ollama 模型，降低长时间空闲后的首字延迟。
+    周期性唤醒 Dialogue Provider，降低长时间空闲后的首字延迟。
 
     参数:
         无传入参数，依赖全局 LLM_KEEPALIVE_INTERVAL_SEC。
     """
     while True:
         await asyncio.sleep(LLM_KEEPALIVE_INTERVAL_SEC)
-        await warm_up_llm_model("keepalive")
+        await dialogue_provider.warm_up("keepalive")
 
 
 @app.on_event("startup")
@@ -336,8 +332,8 @@ async def startup_event() -> None:
     """
     global llm_keepalive_task
 
-    # LLM 是异步请求，TTS 是同步推理；TTS 放到线程里避免阻塞事件循环。
-    await warm_up_llm_model("startup")
+    # Dialogue Provider 是异步请求，TTS 是同步推理；TTS 放到线程里避免阻塞事件循环。
+    await dialogue_provider.warm_up("startup")
     await asyncio.to_thread(warm_up_tts_model)
     llm_keepalive_task = asyncio.create_task(maintain_llm_keepalive())
 
@@ -345,7 +341,7 @@ async def startup_event() -> None:
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     """
-    FastAPI 关闭钩子，取消后台任务并关闭 httpx 连接池。
+    FastAPI 关闭钩子，取消后台任务并关闭 Dialogue Provider。
 
     参数:
         无传入参数，由 FastAPI 生命周期自动调用。
@@ -359,7 +355,7 @@ async def shutdown_event() -> None:
             await llm_keepalive_task
         llm_keepalive_task = None
 
-    await custom_http_client.aclose()
+    await dialogue_provider.close()
 
 
 def sanitize_stream_text(text: str) -> str:
@@ -462,6 +458,32 @@ def normalize_action_card(value: Any) -> dict[str, str] | None:
     }
 
 
+def derive_live2d_action(reply_text: str, emotion_mode: str, action_card: dict[str, str] | None) -> str:
+    """
+    根据业务卡片、回复文本和播报情绪推导前端 Live2D 动作。
+
+    参数:
+        reply_text: 已规整的回复文本。
+        emotion_mode: 已规整的播报情绪。
+        action_card: 已规整的业务卡片，可能为空。
+    """
+    if action_card and action_card.get("type") == "NAVIGATE":
+        return "point"
+    if action_card and action_card.get("type") == "ALERT":
+        return "alert"
+
+    if any(keyword in reply_text for keyword in ("登机口", "值机", "安检", "行李", "出口", "电梯", "扶梯", "左", "右", "前方", "直行", "楼", "层", "到达", "出发", "柜台", "区域", "航站楼", "路线", "导航")):
+        return "point"
+    if any(keyword in reply_text for keyword in ("别着急", "不用担心", "请放心", "我来", "帮您", "协助", "稍等", "可以先", "建议您先")) or emotion_mode in {"shy", "sad"}:
+        return "comfort"
+    if any(keyword in reply_text for keyword in ("紧急", "马上", "立即", "延误", "取消", "异常", "警报", "危险", "注意")) or emotion_mode in {"angry", "surprised"}:
+        return "alert"
+    if any(keyword in reply_text for keyword in ("好的", "可以", "已为您", "没问题", "完成", "谢谢", "不客气", "确认", "祝您")) or emotion_mode == "smile":
+        return "confirm"
+
+    return "explain"
+
+
 def normalize_agent_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     """
     规整 LLM 最终 JSON 对象，给下游统一字段结构。
@@ -470,10 +492,15 @@ def normalize_agent_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
         payload: LLM 完整 JSON 解析结果；解析失败时可以为 None。
     """
     payload = payload or {}
+    reply_text = normalize_reply_text(payload.get("replyText"))
+    emotion_mode = normalize_emotion_mode(payload.get("emotionMode"))
+    action_card = normalize_action_card(payload.get("actionCard"))
+
     return {
-        "replyText": normalize_reply_text(payload.get("replyText")),
-        "emotionMode": normalize_emotion_mode(payload.get("emotionMode")),
-        "actionCard": normalize_action_card(payload.get("actionCard")),
+        "replyText": reply_text,
+        "emotionMode": emotion_mode,
+        "actionCard": action_card,
+        "live2dAction": derive_live2d_action(reply_text, emotion_mode, action_card),
     }
 
 
@@ -901,33 +928,6 @@ def build_user_emotion_guidance(user_emotion_analysis: dict[str, Any] | None) ->
     )
 
 
-def extract_delta_text(chunk: Any) -> str:
-    """
-    兼容 OpenAI SDK 在不同模型下返回的 delta 结构。
-
-    参数:
-        chunk: OpenAI/Ollama 流式返回的单个 chunk 对象。
-    """
-    if not getattr(chunk, "choices", None):
-        return ""
-
-    delta = chunk.choices[0].delta
-    content = getattr(delta, "content", None)
-    if isinstance(content, str):
-        return content
-
-    if isinstance(content, list):
-        # 某些模型会把 content 拆成对象列表，这里拼回纯文本。
-        parts: list[str] = []
-        for item in content:
-            text = getattr(item, "text", None)
-            if text:
-                parts.append(text)
-        return "".join(parts)
-
-    return ""
-
-
 def decode_partial_json_string(source: str, value_start: int) -> tuple[str | None, bool]:
     """
     从 JSON 字符串值的起点开始做增量解码。
@@ -1239,22 +1239,6 @@ def audio_tensor_to_pcm16_bytes(audio_tensor: torch.Tensor) -> tuple[bytes, int]
     return pcm_int16.tobytes(), int(pcm_int16.shape[0])
 
 
-def pack_binary_event(metadata: dict[str, Any], payload: bytes) -> bytes:
-    """
-    自定义二进制协议:
-    - 前 4 字节: metadata JSON 长度 (little-endian uint32)
-    - 中间: UTF-8 JSON metadata
-    - 尾部: 原始 PCM 音频字节
-    这样前端无需 base64 解码，直接能拿到 ArrayBuffer。
-
-    参数:
-        metadata: 当前音频 chunk 的描述信息，会被编码为 JSON。
-        payload: 当前音频 chunk 的 PCM 字节数据。
-    """
-    metadata_bytes = json.dumps(metadata, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    return struct.pack("<I", len(metadata_bytes)) + metadata_bytes + payload
-
-
 async def safe_send_json(websocket: WebSocket, send_lock: asyncio.Lock, payload: dict[str, Any]) -> None:
     """
     串行发送 JSON WebSocket 消息，避免多个协程同时写 socket。
@@ -1300,13 +1284,30 @@ async def receive_user_turn(websocket: WebSocket) -> dict[str, Any]:
         audio_bytes = message.get("bytes")
         if audio_bytes is not None:
             print(f"📦 收到前端语音包，大小: {len(audio_bytes)} bytes")
+            if len(audio_bytes) < MIN_AUDIO_PACKET_BYTES:
+                print("⚠️ audio packet rejected: too small")
+                return {
+                    "text": "",
+                    "emotionContext": pending_emotion_context,
+                    "inputError": "语音数据无效，请重新录音",
+                }
+
             temp_audio_path = os.path.join(base_dir, f"temp_record_{uuid.uuid4().hex}.webm")
             try:
                 # SenseVoice 接收文件路径，所以先把浏览器录音包临时落盘。
                 with open(temp_audio_path, "wb") as audio_file:
                     audio_file.write(audio_bytes)
 
-                res = asr_model.generate(input=temp_audio_path, cache={}, language="zh", use_itn=True)
+                try:
+                    res = asr_model.generate(input=temp_audio_path, cache={}, language="zh", use_itn=True)
+                except (RuntimeError, OSError, ValueError) as exc:
+                    print(f"⚠️ audio decode/asr input rejected ({type(exc).__name__})")
+                    return {
+                        "text": "",
+                        "emotionContext": pending_emotion_context,
+                        "inputError": "语音数据无效，请重新录音",
+                    }
+
                 return {
                     "text": clean_asr_text(res[0]["text"]),
                     "emotionContext": pending_emotion_context,
@@ -1348,8 +1349,9 @@ async def stream_llm_reply(
     clean_text: str,
     websocket: WebSocket,
     send_lock: asyncio.Lock,
-    sentence_queue: asyncio.Queue[str | None],
+    sentence_queue: asyncio.Queue[dict[str, Any] | str | None],
     user_emotion_analysis: dict[str, Any] | None,
+    turn_started_at: float,
 ) -> dict[str, Any]:
     """
     让 LLM 流式输出 JSON，并在对象尚未闭合时就提前提取 emotionMode / replyText。
@@ -1369,13 +1371,26 @@ async def stream_llm_reply(
     emotion_ready_logged = False
     first_sentence_logged = False
     sentence_buffer_started_at: float | None = None
-    turn_started_at = time.perf_counter()
+    first_llm_delta_ms: float | None = None
+    emotion_ready_ms: float | None = None
+    first_sentence_ms: float | None = None
     current_payload = {
         "transcript": clean_text,
         "replyText": "",
         "emotionMode": "neutral",
         "actionCard": None,
+        "live2dAction": "explain",
     }
+    next_segment_index = 0
+
+    async def enqueue_tts_segment(text: str) -> None:
+        """Keep sentence identity beside its text without changing the TTS provider API."""
+        nonlocal next_segment_index
+        await sentence_queue.put({
+            "text": text,
+            "segmentIndex": next_segment_index,
+        })
+        next_segment_index += 1
 
     # 先通知前端文本流开始，让 UI 进入可接收增量字幕的状态。
     await safe_send_json(
@@ -1388,10 +1403,8 @@ async def stream_llm_reply(
     )
 
     try:
-        response_stream = await llm_client.chat.completions.create(
-            model=LLM_MODEL_NAME,
+        response_stream = dialogue_provider.stream_text(
             temperature=0.3,
-            stream=True,
             messages=[
                 {
                     "role": "system",
@@ -1421,14 +1434,11 @@ async def stream_llm_reply(
         )
 
         # LLM 每吐出一小段 JSON，就尝试增量解析，前端和 TTS 不等完整对象。
-        async for chunk in response_stream:
-            delta_text = extract_delta_text(chunk)
-            if not delta_text:
-                continue
-
+        async for delta_text in response_stream:
             if not first_llm_delta_logged:
                 first_llm_delta_logged = True
-                print(f"🧠 收到首个 LLM delta，耗时: {time.perf_counter() - turn_started_at:.3f}s")
+                first_llm_delta_ms = (time.perf_counter() - turn_started_at) * 1000
+                print(f"🧠 收到首个 LLM delta，耗时: {first_llm_delta_ms / 1000:.3f}s")
 
             parser_result = extractor.feed(delta_text)
 
@@ -1436,9 +1446,15 @@ async def stream_llm_reply(
                 # 情绪一旦闭合就先推给前端，数字人表情可以提前变化。
                 emotion_ready = True
                 current_payload["emotionMode"] = parser_result["emotionMode"]
+                current_payload["live2dAction"] = derive_live2d_action(
+                    current_payload["replyText"],
+                    current_payload["emotionMode"],
+                    current_payload["actionCard"],
+                )
                 if not emotion_ready_logged:
                     emotion_ready_logged = True
-                    print(f"🙂 emotionMode 已就绪，耗时: {time.perf_counter() - turn_started_at:.3f}s")
+                    emotion_ready_ms = (time.perf_counter() - turn_started_at) * 1000
+                    print(f"🙂 emotionMode 已就绪，耗时: {emotion_ready_ms / 1000:.3f}s")
                 await safe_send_json(
                     websocket,
                     send_lock,
@@ -1446,6 +1462,7 @@ async def stream_llm_reply(
                         "type": "AGENT_STATE_DELTA",
                         "payload": {
                             "emotionMode": current_payload["emotionMode"],
+                            "live2dAction": current_payload["live2dAction"],
                         },
                     },
                 )
@@ -1454,6 +1471,11 @@ async def stream_llm_reply(
             if reply_delta:
                 # replyText 增量既推字幕，也进入待切句缓冲区。
                 current_payload["replyText"] = parser_result["replyText"]
+                current_payload["live2dAction"] = derive_live2d_action(
+                    current_payload["replyText"],
+                    current_payload["emotionMode"],
+                    current_payload["actionCard"],
+                )
                 if not sentence_buffer:
                     sentence_buffer_started_at = time.perf_counter()
                 sentence_buffer += reply_delta
@@ -1472,6 +1494,11 @@ async def stream_llm_reply(
             if parser_result["actionCard"] is not UNSET:
                 # actionCard 可能比完整回复更晚出现，单独作为状态增量推送。
                 current_payload["actionCard"] = parser_result["actionCard"]
+                current_payload["live2dAction"] = derive_live2d_action(
+                    current_payload["replyText"],
+                    current_payload["emotionMode"],
+                    current_payload["actionCard"],
+                )
                 await safe_send_json(
                     websocket,
                     send_lock,
@@ -1479,6 +1506,7 @@ async def stream_llm_reply(
                         "type": "AGENT_STATE_DELTA",
                         "payload": {
                             "actionCard": current_payload["actionCard"],
+                            "live2dAction": current_payload["live2dAction"],
                         },
                     },
                 )
@@ -1506,11 +1534,12 @@ async def stream_llm_reply(
                         continue
                     if not first_sentence_logged:
                         first_sentence_logged = True
-                        print(f"✂️ 首个可播句段已切出，耗时: {time.perf_counter() - turn_started_at:.3f}s")
+                        first_sentence_ms = (time.perf_counter() - turn_started_at) * 1000
+                        print(f"✂️ 首个可播句段已切出，耗时: {first_sentence_ms / 1000:.3f}s")
                     if used_forced_split:
                         print(f"⚡ 首句未等到标点，提前强切送入 TTS: {sentence}")
                     print(f"📝 JSON 首句已就绪，准备送入 TTS: {sentence}")
-                    await sentence_queue.put(sentence)
+                    await enqueue_tts_segment(sentence)
 
                 sentence_buffer_started_at = time.perf_counter() if sentence_buffer else None
 
@@ -1520,6 +1549,7 @@ async def stream_llm_reply(
 
         if final_payload["emotionMode"] != current_payload["emotionMode"]:
             current_payload["emotionMode"] = final_payload["emotionMode"]
+            current_payload["live2dAction"] = final_payload["live2dAction"]
             await safe_send_json(
                 websocket,
                 send_lock,
@@ -1527,6 +1557,7 @@ async def stream_llm_reply(
                     "type": "AGENT_STATE_DELTA",
                     "payload": {
                         "emotionMode": current_payload["emotionMode"],
+                        "live2dAction": current_payload["live2dAction"],
                     },
                 },
             )
@@ -1535,6 +1566,7 @@ async def stream_llm_reply(
             prefix_length = longest_common_prefix_length(current_payload["replyText"], final_payload["replyText"])
             missing_delta = final_payload["replyText"][prefix_length:]
             current_payload["replyText"] = final_payload["replyText"]
+            current_payload["live2dAction"] = final_payload["live2dAction"]
             if missing_delta:
                 # 把最终校准中补出来的文本继续送进 TTS 缓冲，避免尾句丢失。
                 sentence_buffer += missing_delta
@@ -1552,6 +1584,7 @@ async def stream_llm_reply(
 
         if final_payload["actionCard"] != current_payload["actionCard"]:
             current_payload["actionCard"] = final_payload["actionCard"]
+            current_payload["live2dAction"] = final_payload["live2dAction"]
             await safe_send_json(
                 websocket,
                 send_lock,
@@ -1559,12 +1592,14 @@ async def stream_llm_reply(
                     "type": "AGENT_STATE_DELTA",
                     "payload": {
                         "actionCard": current_payload["actionCard"],
+                        "live2dAction": current_payload["live2dAction"],
                     },
                 },
             )
 
         if not emotion_ready:
             emotion_ready = True
+            emotion_ready_ms = (time.perf_counter() - turn_started_at) * 1000
 
         if emotion_ready and sentence_buffer:
             # 收尾阶段把还能按标点切出的句子全部送入 TTS。
@@ -1572,13 +1607,19 @@ async def stream_llm_reply(
             for sentence in ready_sentences:
                 if not is_speakable_sentence(sentence):
                     continue
+                if not first_sentence_logged:
+                    first_sentence_logged = True
+                    first_sentence_ms = (time.perf_counter() - turn_started_at) * 1000
                 print(f"📝 JSON 收尾句段送入 TTS: {sentence}")
-                await sentence_queue.put(sentence)
+                await enqueue_tts_segment(sentence)
 
         if sentence_buffer.strip() and is_speakable_sentence(sentence_buffer.strip()):
             # 最后一段即使没有标点，也要作为尾句播报。
+            if not first_sentence_logged:
+                first_sentence_logged = True
+                first_sentence_ms = (time.perf_counter() - turn_started_at) * 1000
             print(f"📝 JSON 最后一段送入 TTS: {sentence_buffer.strip()}")
-            await sentence_queue.put(sentence_buffer.strip())
+            await enqueue_tts_segment(sentence_buffer.strip())
 
         await safe_send_json(
             websocket,
@@ -1589,6 +1630,7 @@ async def stream_llm_reply(
                     "replyText": current_payload["replyText"],
                     "emotionMode": current_payload["emotionMode"],
                     "actionCard": current_payload["actionCard"],
+                    "live2dAction": current_payload["live2dAction"],
                 },
             },
         )
@@ -1598,7 +1640,13 @@ async def stream_llm_reply(
             "replyText": current_payload["replyText"],
             "emotionMode": current_payload["emotionMode"],
             "actionCard": current_payload["actionCard"],
+            "live2dAction": current_payload["live2dAction"],
             "userEmotionAnalysis": user_emotion_analysis,
+            "_paperTiming": {
+                "llmFirstDeltaMs": first_llm_delta_ms,
+                "emotionReadyMs": emotion_ready_ms,
+                "firstSentenceMs": first_sentence_ms,
+            },
         }
     except Exception as exc:
         # LLM 失败时仍向前端和 TTS 提供一致的兜底回复，避免本轮卡死。
@@ -1607,7 +1655,13 @@ async def stream_llm_reply(
             "replyText": "系统处理异常，请稍后再试。",
             "emotionMode": "sad",
             "actionCard": None,
+            "live2dAction": "comfort",
             "userEmotionAnalysis": user_emotion_analysis,
+            "_paperTiming": {
+                "llmFirstDeltaMs": first_llm_delta_ms,
+                "emotionReadyMs": emotion_ready_ms,
+                "firstSentenceMs": first_sentence_ms,
+            },
         }
         print(f"⚠️ LLM 流式推理失败: {exc}")
         await safe_send_json(
@@ -1617,6 +1671,7 @@ async def stream_llm_reply(
                 "type": "AGENT_STATE_DELTA",
                 "payload": {
                     "emotionMode": fallback_payload["emotionMode"],
+                    "live2dAction": fallback_payload["live2dAction"],
                 },
             },
         )
@@ -1640,10 +1695,11 @@ async def stream_llm_reply(
                     "replyText": fallback_payload["replyText"],
                     "emotionMode": fallback_payload["emotionMode"],
                     "actionCard": None,
+                    "live2dAction": fallback_payload["live2dAction"],
                 },
             },
         )
-        await sentence_queue.put(fallback_payload["replyText"])
+        await enqueue_tts_segment(fallback_payload["replyText"])
         return fallback_payload
     finally:
         # None 是 TTS 消费者的结束哨兵，确保异常路径也能退出。
@@ -1658,6 +1714,7 @@ async def stream_sentence_audio(
     chunk_index_start: int,
     turn_started_at: float,
     stream_announced: bool,
+    segment_index: int = 0,
 ) -> tuple[int, int, float | None, bool]:
     """
     把单个句段交给 CosyVoice 的流式生成器。
@@ -1722,7 +1779,8 @@ async def stream_sentence_audio(
         if isinstance(item, Exception):
             raise item
 
-        if first_chunk_at is None:
+        is_segment_first_chunk = first_chunk_at is None
+        if is_segment_first_chunk:
             first_chunk_at = time.perf_counter()
             if not stream_announced:
                 stream_announced = True
@@ -1760,6 +1818,12 @@ async def stream_sentence_audio(
             "visemeFps": VISEME_FPS,
             "visemeChunk": viseme_chunk,
         }
+        if is_segment_first_chunk:
+            metadata.update({
+                "segmentStart": True,
+                "segmentIndex": segment_index,
+                "segmentText": sentence,
+            })
         await safe_send_bytes(websocket, send_lock, pack_binary_event(metadata, pcm_bytes))
         chunk_index += 1
 
@@ -1769,7 +1833,7 @@ async def stream_sentence_audio(
 async def stream_tts_pipeline(
     websocket: WebSocket,
     send_lock: asyncio.Lock,
-    sentence_queue: asyncio.Queue[str | None],
+    sentence_queue: asyncio.Queue[dict[str, Any] | str | None],
     turn_started_at: float,
 ) -> dict[str, Any]:
     """
@@ -1791,12 +1855,17 @@ async def stream_tts_pipeline(
 
     try:
         while True:
-            sentence = await sentence_queue.get()
-            if sentence is None:
+            queued_segment = await sentence_queue.get()
+            if queued_segment is None:
                 # LLM 生产者发送 None 作为结束哨兵，TTS 流水线据此收尾。
                 break
 
-            sentence = sentence.strip()
+            if isinstance(queued_segment, str):
+                sentence = queued_segment.strip()
+                segment_index = 0
+            else:
+                sentence = str(queued_segment.get("text", "")).strip()
+                segment_index = int(queued_segment.get("segmentIndex", 0))
             if not sentence:
                 continue
 
@@ -1810,6 +1879,7 @@ async def stream_tts_pipeline(
                 chunk_index_start=chunk_index,
                 turn_started_at=turn_started_at,
                 stream_announced=started,
+                segment_index=segment_index,
             )
             total_samples += sentence_samples
 
@@ -1871,6 +1941,19 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             turn_started_at = time.perf_counter()
             user_turn = await receive_user_turn(websocket)
+            input_error = user_turn.get("inputError")
+            if input_error:
+                await safe_send_json(
+                    websocket,
+                    send_lock,
+                    {
+                        "type": "ERROR",
+                        "status": "IDLE",
+                        "payload": {"message": str(input_error)},
+                    },
+                )
+                continue
+
             clean_text = str(user_turn.get("text", "")).strip()
             client_emotion_context = user_turn.get("emotionContext")
             print(f"🎙️ 旅客说: {clean_text}")
@@ -1883,7 +1966,7 @@ async def websocket_endpoint(websocket: WebSocket):
             user_emotion_analysis = fuse_user_emotion_analysis(clean_text, client_emotion_context)
             await safe_send_json(websocket, send_lock, {"type": "USER_EMOTION_ANALYSIS", "payload": user_emotion_analysis})
 
-            sentence_queue: asyncio.Queue[str | None] = asyncio.Queue()
+            sentence_queue: asyncio.Queue[dict[str, Any] | str | None] = asyncio.Queue()
 
             # 1. LLM 流式产出文本并持续切句
             llm_task = asyncio.create_task(
@@ -1893,6 +1976,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     send_lock=send_lock,
                     sentence_queue=sentence_queue,
                     user_emotion_analysis=user_emotion_analysis,
+                    turn_started_at=turn_started_at,
                 )
             )
 
@@ -1909,6 +1993,41 @@ async def websocket_endpoint(websocket: WebSocket):
             llm_payload = await llm_task
             tts_payload = await tts_task
             full_reply_text = llm_payload["replyText"]
+            llm_timing = llm_payload.get("_paperTiming", {})
+            first_audio_chunk_at = tts_payload.get("firstAudioChunkAt")
+            ttfa_ms = (
+                (first_audio_chunk_at - turn_started_at) * 1000
+                if isinstance(first_audio_chunk_at, (int, float))
+                else None
+            )
+            first_sentence_ms = llm_timing.get("firstSentenceMs")
+            append_paper_runtime_record(
+                {
+                    "trialId": uuid.uuid4().hex,
+                    "transcript": clean_text,
+                    "llmModel": LLM_MODEL_NAME,
+                    "asrDevice": ASR_DEVICE,
+                    "llmFirstDeltaMs": llm_timing.get("llmFirstDeltaMs"),
+                    "emotionReadyMs": llm_timing.get("emotionReadyMs"),
+                    "firstSentenceMs": first_sentence_ms,
+                    "sentenceWaitMs": (
+                        first_sentence_ms - llm_timing["llmFirstDeltaMs"]
+                        if isinstance(first_sentence_ms, (int, float))
+                        and isinstance(llm_timing.get("llmFirstDeltaMs"), (int, float))
+                        else None
+                    ),
+                    "ttsFirstChunkMs": (
+                        ttfa_ms - first_sentence_ms
+                        if isinstance(ttfa_ms, (int, float))
+                        and isinstance(first_sentence_ms, (int, float))
+                        else None
+                    ),
+                    "ttfaMs": ttfa_ms,
+                    "turnCompletionMs": (time.perf_counter() - turn_started_at) * 1000,
+                    "audioDurationSec": tts_payload["audioDuration"],
+                    "userEmotionAnalysis": user_emotion_analysis,
+                }
+            )
 
             print(f"🧠 LLM 最终回复: {full_reply_text}")
             if tts_payload["started"]:
